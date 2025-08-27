@@ -1,14 +1,16 @@
 #include "DHT.h"
 #include <WiFi.h>
 #include <Firebase_ESP_Client.h>
-
+#include "FS.h"
+#include "SD.h"
+#include "SPI.h"
 #define DHTTYPE DHT11 
 #define WIFI_SSID "p"
 #define WIFI_PASSWORD "pppppppppp"
 #define API_KEY "AIzaSyBFOP544VcMrLKnDQHH8DpZZ-DrO9bMsAw"
 #define DATABASE_URL "https://smart-farming-4ba44-default-rtdb.asia-southeast1.firebasedatabase.app"
 
-const int DHTPIN = 4;
+const int DHTPIN = 33;
 const int MQPIN = 34;
 
 unsigned long previousDHTMillis = 0;
