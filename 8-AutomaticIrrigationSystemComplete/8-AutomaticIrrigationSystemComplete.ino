@@ -1,7 +1,7 @@
 /*Ini Berasal Dari Blynk Silahkan disesuaikan*/
-#define BLYNK_TEMPLATE_ID "TMPL6V8NLFNyi"
-#define BLYNK_TEMPLATE_NAME "IrigasiSystem"
-#define BLYNK_AUTH_TOKEN "ujIgveF0hXhukpREDXkz-bMeZYNlpNwv"
+#define BLYNK_TEMPLATE_ID "TMPL67nN4Ar0-"
+#define BLYNK_TEMPLATE_NAME "Automatic Irrigation System PBL"
+#define BLYNK_AUTH_TOKEN "b8p_4dLzVZFZ5ZtA8X_IFWyBFUXAtpL5"
 /*library*/
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
@@ -16,9 +16,9 @@
 /*Deklarasi Variabel LCD*/
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-// Alamat EEPROM (offset tiap variabel) 
-#define ADDR_KALIBSUHU 0  //dimulai dari alamat 0 
-#define ADDR_BATASSUHU 4  //dimulai dari alamat 4 agar tidak tabrakan dengan nilai sebelumnya
+// Alamat EEPROM (offset tiap variabel)
+#define ADDR_KALIBSUHU 0     //dimulai dari alamat 0
+#define ADDR_BATASSUHU 4     //dimulai dari alamat 4 agar tidak tabrakan dengan nilai sebelumnya
 #define ADDR_JADWALJAM 10    // array jam [2]
 #define ADDR_JADWALMENIT 20  // array menit [2]
 #define ADDR_DURASI 30       // array durasi [2]
@@ -37,7 +37,7 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 #define RELAY_POMPA1 15
 #define RELAY_MANUAL 26  // Relay untuk indikator mode manual
 #define BTN_MANUAL 33
-    // Tombol manual pompa
+// Tombol manual pompa
 
 /*Deklarasi Variabel dan Penetapan Fungsi untuk Pembacaan dan Komunikasi NTP*/
 DHT dht(DHTPIN, DHTTYPE);
@@ -47,11 +47,11 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org", 7 * 3600, 60000);  // GMT+7 WIB, up
 
 /*variabel untuk menyimpan data millis dan cek wifi sekali 5 detik*/
 unsigned long lastCheck = 0;
-const long checkInterval = 5000;          // cek wifi tiap 5 detik
+const long checkInterval = 5000;  // cek wifi tiap 5 detik
 
 /* koneksi internet sesuaikan dengan wifi dilokasi yang akan kita tempatkan*/
-const char* ssid = "Galaxy A55 5G 8876";  // ganti sesuai WiFi kamu
-const char* pass = "12345678";
+const char* ssid = "Ws-Eletronika";  // ganti sesuai WiFi kamu
+const char* pass = "@bpvppdg25";
 const char* auth = BLYNK_AUTH_TOKEN;
 
 /*Flag atau Penanda untuk kondisi*/
@@ -87,7 +87,7 @@ int kalibSuhu = 0;
 bool flag = false;
 // Set Batas Suhu
 int batasSuhu = 28;
-int batasBuffer[2] = { 2, 8 }; //untuk Menyimpan data suhu karena 2 digit
+int batasBuffer[2] = { 2, 8 };  //untuk Menyimpan data suhu karena 2 digit
 // ---------- Jadwal P1 ----------
 int jadwalJam[2] = { 8, 20 };                  // default jam mulai
 int jadwalMenit[2] = { 0, 0 };                 // default menit mulai
@@ -101,7 +101,7 @@ unsigned long lastWifiTry = 0;
 unsigned long lastBlynkTry = 0;
 bool pompaManual = false;
 bool lastBtnState = HIGH;
-static bool synced = false; //flag untuk menyimpan kondisi sinkronisasi waktu ntp dan rtc
+static bool synced = false;  //flag untuk menyimpan kondisi sinkronisasi waktu ntp dan rtc
 
 /*Tombol Virtual Blynk*/
 BLYNK_WRITE(V0) {
@@ -140,7 +140,6 @@ void syncRTCwithNTP() {
   }
 }
 
-
 void setup() {
 
   lcd.init();
@@ -175,7 +174,7 @@ void setup() {
   timeClient.begin();
 
   Blynk.syncVirtual(V0, !modeManual);
-  
+
   lcd.setCursor(0, 0);
   lcd.print("   SISTEM START  ");
   lcd.setCursor(0, 1);
@@ -453,7 +452,7 @@ void loop() {
   if (WiFi.status() == WL_CONNECTED && Blynk.connected()) {
     // Blynk.syncVirtual(V0,modeManual ? 1 : 0);
     syncRTCwithNTP();  // cek koneksi + sinkronisasi RTC ke NTP
-     
+
     if (flag == false) {
       Blynk.syncVirtual(V0, modeManual ? 1 : 0);
       lcd.init();
