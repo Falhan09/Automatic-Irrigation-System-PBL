@@ -25,18 +25,18 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 #define ADDR_PASSWORD 40     // array password [4]
 
 /*Deklarasi Variabel Komponen yang digunakan*/
-#define DHTPIN 25
+#define DHTPIN 19
 #define DHTTYPE DHT11
-#define LED_AUTO 13
-#define LED_MANUAL 12
-#define MODE_BTN 32
-#define BACK_BTN 17
-#define UP_BTN 19
-#define DOWN_BTN 18
-#define OK_BTN 5
+#define LED_AUTO 4
+#define LED_MANUAL 2
+#define MODE_BTN 26
+#define BACK_BTN 13
+#define UP_BTN 14
+#define DOWN_BTN 12
+#define OK_BTN 27
 #define RELAY_POMPA1 15
-#define RELAY_MANUAL 26  // Relay untuk indikator mode manual
-#define BTN_MANUAL 33
+#define RELAY_MANUAL 5  // Relay untuk indikator mode manual
+#define BTN_MANUAL 25
 // Tombol manual pompa
 
 /*Deklarasi Variabel dan Penetapan Fungsi untuk Pembacaan dan Komunikasi NTP*/
