@@ -1,7 +1,7 @@
 /*Ini Berasal Dari Blynk Silahkan disesuaikan*/
-#define BLYNK_TEMPLATE_ID "TMPL6V8NLFNyi"
-#define BLYNK_TEMPLATE_NAME "IrigasiSystem"
-#define BLYNK_AUTH_TOKEN "ujIgveF0hXhukpREDXkz-bMeZYNlpNwv"
+#define BLYNK_TEMPLATE_ID "TMPL6Y2NNJslG"
+#define BLYNK_TEMPLATE_NAME "Smart Farming"
+#define BLYNK_AUTH_TOKEN "KAknEUIk94cr2ZI4eB4zM1d-P2z5Ahau"
 /*library*/
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
@@ -16,47 +16,48 @@
 /*Deklarasi Variabel LCD*/
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-// Alamat EEPROM (offset tiap variabel) 
-#define ADDR_KALIBSUHU 0  //dimulai dari alamat 0 
-#define ADDR_BATASSUHU 4  //dimulai dari alamat 4 agar tidak tabrakan dengan nilai sebelumnya
+// Alamat EEPROM (offset tiap variabel)
+#define ADDR_KALIBSUHU 0     //dimulai dari alamat 0
+#define ADDR_BATASSUHU 4     //dimulai dari alamat 4 agar tidak tabrakan dengan nilai sebelumnya
 #define ADDR_JADWALJAM 10    // array jam [2]
 #define ADDR_JADWALMENIT 20  // array menit [2]
 #define ADDR_DURASI 30       // array durasi [2]
 #define ADDR_PASSWORD 40     // array password [4]
 
 /*Deklarasi Variabel Komponen yang digunakan*/
-#define DHTPIN 5
+#define DHTPIN 33
 #define DHTTYPE DHT11
-#define LED_AUTO 2
-#define LED_MANUAL 4
+#define LED_AUTO 4
+#define LED_MANUAL 2
 #define MODE_BTN 26
 #define BACK_BTN 13
 #define UP_BTN 14
 #define DOWN_BTN 12
 #define OK_BTN 27
 #define RELAY_POMPA1 15
-#define RELAY_MANUAL 19  // Relay untuk indikator mode manual
-#define BTN_MANUAL 25    // Tombol manual pompa
+#define RELAY_MANUAL 5  // Relay untuk indikator mode manual
+#define BTN_MANUAL 25   // Tombol manual pompa
 
 /*Deklarasi Variabel dan Penetapan Fungsi untuk Pembacaan dan Komunikasi NTP*/
-DHT dht(DHTPIN, DHTTYPE);
+DHT dht(DHTPIN, DHT11);
 RTC_DS3231 rtc;
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 7 * 3600, 60000);  // GMT+7 WIB, update tiap 60 detik
 
 /*variabel untuk menyimpan data millis dan cek wifi sekali 5 detik*/
 unsigned long lastCheck = 0;
-const long checkInterval = 5000;          // cek wifi tiap 5 detik
+const long checkInterval = 5000;  // cek wifi tiap 5 detik
 
 /* koneksi internet sesuaikan dengan wifi dilokasi yang akan kita tempatkan*/
-const char* ssid = "Galaxy A55 5G 8876";  // ganti sesuai WiFi kamu
-const char* pass = "12345678";
+const char* ssid = "Ws-Eletronika";  // ganti sesuai WiFi kamu
+const char* pass = "@bpvppdg25";
 const char* auth = BLYNK_AUTH_TOKEN;
 
 /*Flag atau Penanda untuk kondisi*/
 bool wifiConnected = false;
 bool blynkConnected = false;
 bool modeManual = false;
+bool relayJadwal = true;
 
 /*Variabel untuk menyimpan data suhu*/
 float T = 0;
@@ -86,7 +87,7 @@ int kalibSuhu = 0;
 bool flag = false;
 // Set Batas Suhu
 int batasSuhu = 28;
-int batasBuffer[2] = { 2, 8 }; //untuk Menyimpan data suhu karena 2 digit
+int batasBuffer[2] = { 2, 8 };  //untuk Menyimpan data suhu karena 2 digit
 // ---------- Jadwal P1 ----------
 int jadwalJam[2] = { 8, 20 };                  // default jam mulai
 int jadwalMenit[2] = { 0, 0 };                 // default menit mulai
@@ -100,7 +101,7 @@ unsigned long lastWifiTry = 0;
 unsigned long lastBlynkTry = 0;
 bool pompaManual = false;
 bool lastBtnState = HIGH;
-static bool synced = false; //flag untuk menyimpan kondisi sinkronisasi waktu ntp dan rtc
+static bool synced = false;  //flag untuk menyimpan kondisi sinkronisasi waktu ntp dan rtc
 
 /*Tombol Virtual Blynk*/
 BLYNK_WRITE(V0) {
@@ -142,6 +143,8 @@ void syncRTCwithNTP() {
 
 void setup() {
 
+  Serial.begin(9600);
+
   lcd.init();
   lcd.backlight();
   EEPROM.begin(512);
@@ -165,6 +168,7 @@ void setup() {
   pinMode(OK_BTN, INPUT_PULLUP);
   pinMode(RELAY_POMPA1, OUTPUT);
   digitalWrite(RELAY_MANUAL, HIGH);
+  digitalWrite(RELAY_POMPA1, HIGH);
 
   WiFi.begin(ssid, pass);  // Start WiFi
   Blynk.config(auth);      // Prepare Blynk
@@ -174,7 +178,7 @@ void setup() {
   timeClient.begin();
 
   Blynk.syncVirtual(V0, !modeManual);
-  
+
   lcd.setCursor(0, 0);
   lcd.print("   SISTEM START  ");
   lcd.setCursor(0, 1);
@@ -193,15 +197,14 @@ void updateRelayAndLed() {
   bool relaySuhu = (T + kalibSuhu >= batasSuhu);
 
   // Kondisi relay berdasarkan jadwal
-  bool relayJadwal = false;
   for (int i = 0; i < 2; i++) {
     if (relayOn[i]) {
-      relayJadwal = true;
+      relayJadwal = false;
       // Cek durasi jadwal
       unsigned long elapsed = millis() - relayStartMillis[i];
       if (elapsed >= durasiMenit[i] * 60000UL) {  //ini 60000 = 1 menit, kalau mau detik ubah saja jadi 1000
         relayOn[i] = false;
-        relayJadwal = false;
+        relayJadwal = true;
       }
     }
   }
@@ -407,7 +410,6 @@ void kondisiManual() {
     }
     lastBtnState = curBtnState;
 
-    digitalWrite(RELAY_POMPA1, pompaManual ? HIGH : LOW);
   } else {
     digitalWrite(RELAY_MANUAL, HIGH);  // relay manual OFF di mode Auto
     pompaManual = false;
@@ -452,7 +454,7 @@ void loop() {
   if (WiFi.status() == WL_CONNECTED && Blynk.connected()) {
     // Blynk.syncVirtual(V0,modeManual ? 1 : 0);
     syncRTCwithNTP();  // cek koneksi + sinkronisasi RTC ke NTP
-     
+
     if (flag == false) {
       Blynk.syncVirtual(V0, modeManual ? 1 : 0);
       lcd.init();
