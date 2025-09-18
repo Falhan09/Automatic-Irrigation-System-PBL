@@ -72,8 +72,9 @@ const int MIN_DIGIT = 0;
 bool inputPassword = false;
 
 // Button
+bool lastOkState = HIGH;
+bool lastBackState = HIGH;
 const int DEBOUNCE_DELAY = 200;
-unsigned long lastButtonPress = 0;
 
 // Blink cursor
 bool blinkState = false;
@@ -295,8 +296,8 @@ void menuSetJadwalP1() {
     }
 
     // Tombol OK pindah digit/jadwal
-    if (digitalRead(OK_BTN) == LOW) {
-      delay(50);
+    bool currentOkState = digitalRead(OK_BTN);
+    if (currentOkState == LOW && lastOkState == HIGH) {
       curDigitJ++;
       if (curDigitJ > 2) {
         curDigitJ = 0;
@@ -315,6 +316,7 @@ void menuSetJadwalP1() {
         }
       }
     }
+    lastOkState = currentOkState;
 
     if (digitalRead(BACK_BTN) == LOW) {  // batal
       inJadwal = false;
@@ -491,6 +493,8 @@ void loop() {
 }
 
 void Seluruhnya() {
+  unsigned long nowTime = millis();
+  unsigned long lastButtonPress = 0;
   T = dht.readTemperature();
   DateTime now = rtc.now();
 
@@ -504,7 +508,6 @@ void Seluruhnya() {
   // ---------- Input Password ----------
   if (inputPassword) {
     // Blinking cursor logic
-    unsigned long nowTime = millis();
     if (nowTime - lastBlinkTime >= blinkInterval) {
       blinkState = !blinkState;
       lastBlinkTime = nowTime;
@@ -512,6 +515,8 @@ void Seluruhnya() {
       if (blinkState) lcd.print('_');
       else lcd.print(inputBuffer[curDigit]);
     }
+
+    bool currentOkState = digitalRead(OK_BTN);
 
     if (digitalRead(UP_BTN) == LOW && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
       inputBuffer[curDigit]++;
@@ -533,7 +538,7 @@ void Seluruhnya() {
       lastButtonPress = nowTime;
     }
 
-    if (digitalRead(OK_BTN) == LOW && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
+    if (currentOkState == LOW && lastOkState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
       // Pastikan angka terlihat sebelum pindah
       lcd.setCursor(curDigit * 2, 1);
       lcd.print(inputBuffer[curDigit]);
@@ -578,16 +583,22 @@ void Seluruhnya() {
       }
       lastButtonPress = nowTime;
     }
+    lastOkState = currentOkState;
 
-    // TAMBAHAN: Handle BACK button untuk cancel password
+    // BACK button untuk cancel password
     if (digitalRead(BACK_BTN) == LOW && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
       inputPassword = false;
       inMenu = false;
       lcd.clear();
       lastButtonPress = nowTime;
     }
+
   } else if (inMenu) {
     if (!inCekSuhu && !inKalibSuhu && !inSetBatasSuhu) {
+      bool currentOkState = digitalRead(OK_BTN);
+      bool currentBackState = digitalRead(BACK_BTN);
+      unsigned long nowTime = millis();
+
       if (digitalRead(UP_BTN) == LOW) {
         curMenu--;
         if (curMenu < 0) curMenu = 7;
@@ -606,10 +617,10 @@ void Seluruhnya() {
         lcd.print(">");
         lcd.setCursor(1, 0);
         lcd.print(menuItems[curMenu]);
-        delay(50);
+        delay(200);
       }
-      if (digitalRead(OK_BTN) == LOW) {
-        delay(50);
+
+      if (currentOkState == LOW && lastOkState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
         if (curMenu == 0) {
           inCekSuhu = true;
           lcd.clear();
@@ -671,14 +682,14 @@ void Seluruhnya() {
             if (now.second() < 10) lcd.print('0');
             lcd.print(now.second());
 
-            if (digitalRead(BACK_BTN) == LOW) {
+            if (currentBackState == LOW && lastBackState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
               inWaktu = false;
-              delay(50);
               lcd.clear();
               lcd.setCursor(0, 0);
               lcd.print(">");
               lcd.setCursor(1, 0);
               lcd.print(menuItems[curMenu]);
+              lastButtonPress = nowTime;
             }
             delay(200);
           }
@@ -717,7 +728,6 @@ void Seluruhnya() {
               }
 
               // Update blink
-              unsigned long nowTime = millis();
               if (nowTime - lastBlinkTime >= blinkInterval) {
                 blinkState = !blinkState;
                 lastBlinkTime = nowTime;
@@ -752,8 +762,7 @@ void Seluruhnya() {
               }
 
               // Tombol OK pindah digit
-              if (digitalRead(OK_BTN) == LOW) {
-                delay(50);
+              if (currentOkState == LOW && lastOkState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
                 curDigitRTC++;
                 if (curDigitRTC > 2) {  // Selesai kalibrasi
                   rtc.adjust(DateTime(now.year(), now.month(), now.day(), jam, menit, detik));
@@ -771,7 +780,7 @@ void Seluruhnya() {
               }
 
               // Tombol BACK batal kalibrasi
-              if (digitalRead(BACK_BTN) == LOW) {
+              if (currentBackState == LOW && lastBackState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
                 inKalibRTC = false;
                 delay(200);
                 lcd.clear();
@@ -779,9 +788,9 @@ void Seluruhnya() {
                 lcd.print(">");
                 lcd.setCursor(1, 0);
                 lcd.print(menuItems[curMenu]);
+                lastButtonPress = nowTime;
               }
 
-              delay(50);
             }
           } else {
             lcd.setCursor(0, 0);
@@ -792,7 +801,7 @@ void Seluruhnya() {
             inMenu = false;  // keluar dari menu
             lcd.clear();     // balik ke tampilan awal
           }
-        } else if (curMenu == 5) {
+        } else if (curMenu == 5) {  // Sub-menu set jadwal
           lcd.clear();
           menuSetJadwalP1();
         } else if (curMenu == 6) {  // Sub-menu Set Password
@@ -815,7 +824,6 @@ void Seluruhnya() {
             }
 
             // Blink update
-            unsigned long nowTime = millis();
             if (nowTime - lastBlinkTime >= blinkInterval) {
               blinkState = !blinkState;
               lastBlinkTime = nowTime;
@@ -834,8 +842,7 @@ void Seluruhnya() {
               delay(100);
             }
             // Tombol OK
-            if (digitalRead(OK_BTN) == LOW) {
-              delay(50);
+            if (currentOkState == LOW && lastOkState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
               curDigitPass++;
               if (curDigitPass > 3) {
                 // Simpan password baru
@@ -851,16 +858,17 @@ void Seluruhnya() {
                 lcd.print(menuItems[curMenu]);
                 inSetPass = false;
               }
+              lastButtonPress = nowTime;
             }
             // Tombol BACK
-            if (digitalRead(BACK_BTN) == LOW) {
-              delay(50);
+            if (currentBackState == LOW && lastBackState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
               inSetPass = false;
               lcd.clear();
               lcd.setCursor(0, 0);
               lcd.print(">");
               lcd.setCursor(1, 0);
               lcd.print(menuItems[curMenu]);
+              lastButtonPress = nowTime;
             }
           }
         } else if (curMenu == 7) {  // Sub-menu Upload Program
@@ -868,13 +876,17 @@ void Seluruhnya() {
           inMenu = false;  // keluar dari menu
           lcd.clear();     // balik ke tampilan awal
         }
+        lastButtonPress = nowTime;
       }
-      if (digitalRead(BACK_BTN) == LOW) {
+
+      if (currentBackState == LOW && lastBackState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
         inMenu = false;
         lcd.clear();
+        lastButtonPress = nowTime;
       }
+      lastOkState = currentOkState;
+      lastBackState = currentBackState;
     }
-
 
     // ---------- Sub-menu Cek Suhu ----------
     else if (inCekSuhu) {
@@ -886,19 +898,23 @@ void Seluruhnya() {
       lcd.print((char)223);
       lcd.print("C");
 
-      if (digitalRead(BACK_BTN) == LOW) {
+      bool currentBackState = digitalRead(BACK_BTN);
+      unsigned long nowTime = millis();
+      if (currentBackState == LOW && lastBackState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
         inCekSuhu = false;
         lcd.clear();
         lcd.setCursor(0, 0);
         lcd.print(">");
         lcd.setCursor(1, 0);
         lcd.print(menuItems[curMenu]);
-        delay(50);
+        lastButtonPress = nowTime;
       }
+      lastBackState = currentBackState;
     }
 
     // ---------- Sub-menu Kalib Suhu ----------
     else if (inKalibSuhu) {
+      bool currentBackState = digitalRead(BACK_BTN);
       unsigned long nowTime = millis();
       if (nowTime - lastBlinkTime >= blinkInterval) {
         blinkState = !blinkState;
@@ -938,19 +954,21 @@ void Seluruhnya() {
         }
       }
 
-      if (digitalRead(BACK_BTN) == LOW) {
+      if (currentBackState == LOW && lastBackState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
         inKalibSuhu = false;
         lcd.clear();
         lcd.setCursor(0, 0);
         lcd.print(">");
         lcd.setCursor(1, 0);
         lcd.print(menuItems[curMenu]);
-        delay(100);
+        lastButtonPress = nowTime;
       }
+      lastBackState = currentBackState;
     }
 
     // ---------- Sub-menu Set Batas Suhu ----------
     else if (inSetBatasSuhu) {
+      bool currentBackState = digitalRead(BACK_BTN);
       unsigned long nowTime = millis();
       if (nowTime - lastBlinkTime >= blinkInterval) {
         blinkState = !blinkState;
@@ -993,17 +1011,17 @@ void Seluruhnya() {
         } else lcd.setCursor(curDigit, 1);
       }
 
-      if (digitalRead(BACK_BTN) == LOW) {
+      if (currentBackState == LOW && lastBackState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
         inSetBatasSuhu = false;
         lcd.clear();
         lcd.setCursor(0, 0);
         lcd.print(">");
         lcd.setCursor(1, 0);
         lcd.print(menuItems[curMenu]);
-        delay(50);
+        lastButtonPress = nowTime;
       }
+      lastBackState = currentBackState;
     }
-
 
     // ---------- Tampilan Awal ----------
   } else {
@@ -1065,7 +1083,6 @@ void Seluruhnya() {
       delay(50);  // debounce
     }
 
-
     delay(200);
   }
 }
@@ -1104,16 +1121,6 @@ void loadSettings() {
 }
 
 // Fungsi helper
-
-void cancelPasswordInput() {
-  inputPassword = false;
-  inMenu = false;
-  lcd.clear();
-
-  // Kembali ke tampilan utama
-  // (tampilan akan di-handle oleh bagian else di akhir fungsi Seluruhnya)
-}
-
 void displayDigitAtPosition(int position, bool showDigit) {
   lcd.setCursor(position * 2, 1);
   if (showDigit) {
@@ -1134,25 +1141,6 @@ void decrementDigit(int position) {
   inputBuffer[position]--;
   if (inputBuffer[position] < MIN_DIGIT) {
     inputBuffer[position] = MAX_DIGIT;
-  }
-}
-
-void handleOkButton() {
-  curDigit++;
-
-  if (curDigit >= PASSWORD_LENGTH) {
-    if (validatePassword()) {
-      showPasswordSuccess();
-      enterMainMenu();
-    } else {
-      showPasswordError();
-      resetPasswordInput();
-    }
-  } else {
-    // TAMBAHAN: Ketika pindah ke digit berikutnya
-    blinkState = true;  // Mulai dengan menampilkan angka
-    lastBlinkTime = millis();
-    // Tidak perlu displayDigitAtPosition di sini karena akan di-handle oleh blinking logic
   }
 }
 
