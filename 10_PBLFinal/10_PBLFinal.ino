@@ -430,7 +430,6 @@ void kondisiManual() {
   }
 }
 
-
 // ---------------- WiFi/Blynk reconnect (non-blocking) ----------------
 void tryReconnectWiFi() {
   if (WiFi.status() != WL_CONNECTED && millis() - lastWifiTry > 5000) {
@@ -451,12 +450,6 @@ void loop() {
   // Jalankan Blynk hanya kalau koneksi ada, tapi jangan blokir program
   tryReconnectWiFi();
   tryReconnectBlynk();
-
-
-  // kode sekali jalan
-
-
-  // delay(1000);
 
   // if (WiFi.status() == WL_CONNECTED && Blynk.connected()){ Blynk.run();}  // Run Blynk
   if (WiFi.status() == WL_CONNECTED && Blynk.connected()) {
@@ -650,9 +643,14 @@ void Seluruhnya() {
         } else if (curMenu == 3) {  // Sub-menu Waktu (RTC)
           lcd.clear();
           bool inWaktu = true;
+          unsigned long pressStart = 0;
+          bool backPressed = false;
+
           while (inWaktu) {
+            bool currentBackState = digitalRead(BACK_BTN);
+            unsigned long nowTime = millis();
             DateTime now = rtc.now();
-            // Baris 0: Hari + Tanggal
+
             lcd.setCursor(0, 0);
             switch (now.dayOfTheWeek()) {
               case 0: lcd.print("Minggu "); break;
@@ -671,7 +669,6 @@ void Seluruhnya() {
             lcd.print('/');
             lcd.print(now.year());
 
-            // Baris 1: Jam:Menit:Detik
             lcd.setCursor(0, 1);
             if (now.hour() < 10) lcd.print('0');
             lcd.print(now.hour());
@@ -682,16 +679,27 @@ void Seluruhnya() {
             if (now.second() < 10) lcd.print('0');
             lcd.print(now.second());
 
-            if (currentBackState == LOW && lastBackState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
-              inWaktu = false;
-              lcd.clear();
-              lcd.setCursor(0, 0);
-              lcd.print(">");
-              lcd.setCursor(1, 0);
-              lcd.print(menuItems[curMenu]);
-              lastButtonPress = nowTime;
+            // deteksi awal tombol back ditekan
+            if (currentBackState == LOW && lastBackState == HIGH) {
+              pressStart = nowTime;
+              backPressed = true;
             }
-            delay(200);
+            // deteksi tombol back dilepas
+            if (currentBackState == HIGH && lastBackState == LOW && backPressed) {
+              unsigned long pressDuration = nowTime - pressStart;
+              if (pressDuration >= 50) {  // baik short press maupun long press → sama
+                inWaktu = false;
+                lcd.clear();
+                lcd.setCursor(0, 0);
+                lcd.print(">");
+                lcd.setCursor(1, 0);
+                lcd.print(menuItems[curMenu]);
+              }
+              backPressed = false;
+            }
+
+            lastBackState = currentBackState;
+            delay(100);
           }
         } else if (curMenu == 4) {  // Sub-menu Kalib RTC
           lcd.clear();
@@ -778,6 +786,7 @@ void Seluruhnya() {
                   lcd.print(menuItems[curMenu]);
                 }
               }
+              lastOkState = currentOkState;
 
               // Tombol BACK batal kalibrasi
               if (currentBackState == LOW && lastBackState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
@@ -790,7 +799,7 @@ void Seluruhnya() {
                 lcd.print(menuItems[curMenu]);
                 lastButtonPress = nowTime;
               }
-
+              lastBackState = currentBackState;
             }
           } else {
             lcd.setCursor(0, 0);
@@ -870,6 +879,7 @@ void Seluruhnya() {
               lcd.print(menuItems[curMenu]);
               lastButtonPress = nowTime;
             }
+            lastBackState = currentBackState;
           }
         } else if (curMenu == 7) {  // Sub-menu Upload Program
           animasiUpload();
@@ -1052,8 +1062,8 @@ void Seluruhnya() {
     if (now.second() < 10) lcd.print('0');
     lcd.print(now.second());
 
-    if (digitalRead(OK_BTN) == LOW) {
-      delay(50);
+    bool currentOkState = digitalRead(OK_BTN);
+    if (currentOkState == LOW && lastOkState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
       inputPassword = true;
       curDigit = 0;
       blinkState = true;  // Mulai dengan menampilkan angka, bukan underscore
@@ -1065,8 +1075,8 @@ void Seluruhnya() {
         lcd.setCursor(i * 2, 1);
         lcd.print(inputBuffer[i]);
       }
-      lastBlinkTime = millis();
     }
+    lastOkState = currentOkState;
 
     // Tombol mode Auto/Manual
     // Tombol mode Auto/Manual fisik
@@ -1082,7 +1092,6 @@ void Seluruhnya() {
       }
       delay(50);  // debounce
     }
-
     delay(200);
   }
 }
