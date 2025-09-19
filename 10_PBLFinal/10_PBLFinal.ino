@@ -2,6 +2,7 @@
 #define BLYNK_TEMPLATE_ID "TMPL6Y2NNJslG"
 #define BLYNK_TEMPLATE_NAME "Smart Farming"
 #define BLYNK_AUTH_TOKEN "KAknEUIk94cr2ZI4eB4zM1d-P2z5Ahau"
+
 /*library*/
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
@@ -71,9 +72,21 @@ const int MAX_DIGIT = 9;
 const int MIN_DIGIT = 0;
 bool inputPassword = false;
 
-// Button
+// Button states
 bool lastOkState = HIGH;
 bool lastBackState = HIGH;
+bool lastUpState = HIGH;
+bool lastDownState = HIGH;
+bool lastModeState = HIGH;
+bool lastManualState = HIGH;
+
+// Button timing
+unsigned long lastOkPress = 0;
+unsigned long lastBackPress = 0;
+unsigned long lastUpPress = 0;
+unsigned long lastDownPress = 0;
+unsigned long lastModePress = 0;
+unsigned long lastManualPress = 0;
 const int DEBOUNCE_DELAY = 200;
 
 // Blink cursor
@@ -82,8 +95,8 @@ unsigned long lastBlinkTime = 0;
 const int blinkInterval = 500;
 
 // Fungsi-fungsi untuk Menu
-const char* menuItems[8] = { "Cek Suhu", "Kalib Suhu", "Set Batas Suhu", "Waktu (RTC)",
-                             "Kalib RTC", "Set Jadwal P1", "Set Password", "Upload Program" };
+const char* menuItems[8] = { "Cek Suhu", "Kalibrasi Suhu", "Set Batas Suhu", "Waktu (RTC)",
+                             "Kalibrasi RTC", "Set Jadwal P1", "Set Password", "Upload Program" };
 int curMenu = 0;
 bool inMenu = false;
 bool inCekSuhu = false;
@@ -110,6 +123,45 @@ unsigned long lastBlynkTry = 0;
 bool pompaManual = false;
 bool lastBtnState = HIGH;
 static bool synced = false;  //flag untuk menyimpan kondisi sinkronisasi waktu ntp dan rtc
+
+// Fungsi untuk membaca tombol dengan debounce yang proper
+bool readButton(int pin, bool& lastState, unsigned long& lastPress) {
+  bool currentState = digitalRead(pin);
+  unsigned long currentTime = millis();
+
+  if (currentState == LOW && lastState == HIGH && (currentTime - lastPress > DEBOUNCE_DELAY)) {
+    lastState = currentState;
+    lastPress = currentTime;
+    return true;
+  } else if (currentState != lastState) {
+    lastState = currentState;
+  }
+
+  return false;
+}
+
+// Fungsi untuk tombol yang perlu repeat (UP/DOWN)
+bool readButtonRepeat(int pin, bool& lastState, unsigned long& lastPress, unsigned long repeatDelay = 150) {
+  bool currentState = digitalRead(pin);
+  unsigned long currentTime = millis();
+
+  if (currentState == LOW) {
+    if (lastState == HIGH) {
+      // First press
+      lastState = currentState;
+      lastPress = currentTime;
+      return true;
+    } else if (currentTime - lastPress > repeatDelay) {
+      // Repeat press
+      lastPress = currentTime;
+      return true;
+    }
+  } else {
+    lastState = currentState;
+  }
+
+  return false;
+}
 
 /*Tombol Virtual Blynk*/
 BLYNK_WRITE(V0) {
@@ -233,10 +285,9 @@ void updateJadwalP1() {
   }
 }
 
-
 void menuSetJadwalP1() {
-  int curJadwal = 0;  // 0=jadwal1,1=jadwal2
-  int curDigitJ = 0;  // 0=jam,1=menit,2=durasi
+  int curJadwal = 0;
+  int curDigitJ = 0;
   bool inJadwal = true;
 
   while (inJadwal) {
@@ -267,8 +318,8 @@ void menuSetJadwalP1() {
       lastBlinkTime = nowTime;
     }
 
-    // Tombol UP/DOWN
-    if (digitalRead(UP_BTN) == LOW) {
+    // DIPERBAIKI: Gunakan fungsi button yang proper
+    if (readButtonRepeat(UP_BTN, lastUpState, lastUpPress)) {
       if (curDigitJ == 0) {
         jadwalJam[curJadwal]++;
         if (jadwalJam[curJadwal] > 23) jadwalJam[curJadwal] = 0;
@@ -279,9 +330,9 @@ void menuSetJadwalP1() {
         durasiMenit[curJadwal]++;
         if (durasiMenit[curJadwal] > 59) durasiMenit[curJadwal] = 1;
       }
-      delay(50);
     }
-    if (digitalRead(DOWN_BTN) == LOW) {
+
+    if (readButtonRepeat(DOWN_BTN, lastDownState, lastDownPress)) {
       if (curDigitJ == 0) {
         jadwalJam[curJadwal]--;
         if (jadwalJam[curJadwal] < 0) jadwalJam[curJadwal] = 23;
@@ -292,49 +343,36 @@ void menuSetJadwalP1() {
         durasiMenit[curJadwal]--;
         if (durasiMenit[curJadwal] < 1) durasiMenit[curJadwal] = 1;
       }
-      delay(50);
     }
 
-    // Tombol OK pindah digit/jadwal
-    bool currentOkState = digitalRead(OK_BTN);
-    if (currentOkState == LOW && lastOkState == HIGH) {
+    if (readButton(OK_BTN, lastOkState, lastOkPress)) {
       curDigitJ++;
       if (curDigitJ > 2) {
         curDigitJ = 0;
         curJadwal++;
-        if (curJadwal > 1) {  // selesai set 2 jadwal
+        if (curJadwal > 1) {
           inJadwal = false;
           lcd.clear();
           lcd.setCursor(0, 0);
           lcd.print("Jadwal Tersimpan");
           delay(500);
-          lcd.clear();
-          lcd.setCursor(0, 0);
-          lcd.print(">");
-          lcd.setCursor(1, 0);
-          lcd.print(menuItems[curMenu]);
+          displayMenu();  // DIPERBAIKI: Gunakan displayMenu()
         }
       }
     }
-    lastOkState = currentOkState;
 
-    if (digitalRead(BACK_BTN) == LOW) {  // batal
+    if (readButton(BACK_BTN, lastBackState, lastBackPress)) {
       inJadwal = false;
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print(">");
-      lcd.setCursor(1, 0);
-      lcd.print(menuItems[curMenu]);
-      delay(50);
+      displayMenu();  // DIPERBAIKI: Gunakan displayMenu()
     }
 
-    delay(200);
+    delay(50);  // Small delay for stability
   }
 }
 
 // ---------- Fungsi kalibrasi ± ----------
 void updateKalibSuhu() {
-  if (digitalRead(UP_BTN) == LOW) {
+  if (readButtonRepeat(UP_BTN, lastUpState, lastUpPress)) {
     if (curDigit == 0) kalibSuhu = -kalibSuhu;
     else if (curDigit == 1) {
       int absVal = abs(kalibSuhu);
@@ -351,9 +389,9 @@ void updateKalibSuhu() {
       if (satuan > 9) satuan = 0;
       kalibSuhu = (kalibSuhu < 0 ? -1 : 1) * (puluhan * 10 + satuan);
     }
-    delay(50);
   }
-  if (digitalRead(DOWN_BTN) == LOW) {
+
+  if (readButtonRepeat(DOWN_BTN, lastDownState, lastDownPress)) {
     if (curDigit == 0) kalibSuhu = -kalibSuhu;
     else if (curDigit == 1) {
       int absVal = abs(kalibSuhu);
@@ -370,9 +408,9 @@ void updateKalibSuhu() {
       if (satuan < 0) satuan = 9;
       kalibSuhu = (kalibSuhu < 0 ? -1 : 1) * (puluhan * 10 + satuan);
     }
-    delay(50);
   }
 }
+
 // ---------- Fungsi animasi Upload Program ----------
 void animasiUpload() {
   lcd.clear();
@@ -412,14 +450,12 @@ void kondisiManual() {
     static bool lastBtnState = HIGH;
     bool curBtnState = digitalRead(BTN_MANUAL);
 
-    if (curBtnState == LOW && lastBtnState == HIGH) {  // hanya saat tombol ditekan
-      pompaManual = !pompaManual;                      // toggle
-      Blynk.virtualWrite(V2, pompaManual ? 1 : 0);     // update tombol virtual
+    if (readButton(BTN_MANUAL, lastManualState, lastManualPress)) {
+      pompaManual = !pompaManual;
+      Blynk.virtualWrite(V2, pompaManual ? 1 : 0);
     }
-    lastBtnState = curBtnState;
-
   } else {
-    digitalWrite(RELAY_MANUAL, HIGH);  // relay manual OFF di mode Auto
+    digitalWrite(RELAY_MANUAL, HIGH);
     pompaManual = false;
   }
 
@@ -487,14 +523,10 @@ void loop() {
 
 void Seluruhnya() {
   unsigned long nowTime = millis();
-  unsigned long lastButtonPress = 0;
   T = dht.readTemperature();
   DateTime now = rtc.now();
 
-  // Update jadwal dulu
   updateJadwalP1();
-
-  // Update relay & LED gabungan
   updateRelayAndLed();
   kondisiManual();
 
@@ -509,30 +541,25 @@ void Seluruhnya() {
       else lcd.print(inputBuffer[curDigit]);
     }
 
-    bool currentOkState = digitalRead(OK_BTN);
-
-    if (digitalRead(UP_BTN) == LOW && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
+    if (readButtonRepeat(UP_BTN, lastUpState, lastUpPress)) {
       inputBuffer[curDigit]++;
       if (inputBuffer[curDigit] > 9) inputBuffer[curDigit] = 0;
       lcd.setCursor(curDigit * 2, 1);
       lcd.print(inputBuffer[curDigit]);
-      blinkState = true;        // Reset blink state agar angka terlihat
-      lastBlinkTime = nowTime;  // Reset blink timer
-      lastButtonPress = nowTime;
+      blinkState = true;
+      lastBlinkTime = nowTime;
     }
 
-    if (digitalRead(DOWN_BTN) == LOW && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
+    if (readButtonRepeat(DOWN_BTN, lastDownState, lastDownPress)) {
       inputBuffer[curDigit]--;
       if (inputBuffer[curDigit] < 0) inputBuffer[curDigit] = 9;
       lcd.setCursor(curDigit * 2, 1);
       lcd.print(inputBuffer[curDigit]);
-      blinkState = true;        // Reset blink state agar angka terlihat
-      lastBlinkTime = nowTime;  // Reset blink timer
-      lastButtonPress = nowTime;
+      blinkState = true;
+      lastBlinkTime = nowTime;
     }
 
-    if (currentOkState == LOW && lastOkState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
-      // Pastikan angka terlihat sebelum pindah
+    if (readButton(OK_BTN, lastOkState, lastOkPress)) {
       lcd.setCursor(curDigit * 2, 1);
       lcd.print(inputBuffer[curDigit]);
 
@@ -541,6 +568,7 @@ void Seluruhnya() {
         bool passOk = true;
         for (int i = 0; i < 4; i++)
           if (inputBuffer[i] != password[i]) passOk = false;
+
         lcd.clear();
         lcd.setCursor(0, 0);
         if (passOk) {
@@ -548,511 +576,271 @@ void Seluruhnya() {
           delay(500);
           inMenu = true;
           curMenu = 0;
-          lcd.clear();
-          lcd.setCursor(0, 0);
-          lcd.print(">");
-          lcd.setCursor(1, 0);
-          lcd.print(menuItems[curMenu]);
+          displayMenu();  // DIPERBAIKI: Gunakan displayMenu()
           inputPassword = false;
         } else {
           lcd.print("Password Salah");
           delay(1000);
-          for (int i = 0; i < 4; i++) inputBuffer[i] = 0;
-          curDigit = 0;
-          blinkState = true;  // Mulai dengan menampilkan angka
-          lcd.clear();
-          lcd.setCursor(0, 0);
-          lcd.print("Password:");
-          for (int i = 0; i < 4; i++) {
-            lcd.setCursor(i * 2, 1);
-            lcd.print(inputBuffer[i]);
-          }
-          lastBlinkTime = millis();
+          resetPasswordInput();
         }
       } else {
-        blinkState = true;  // Reset blink state untuk digit berikutnya
+        blinkState = true;
         lastBlinkTime = nowTime;
         lcd.setCursor(curDigit * 2, 1);
       }
-      lastButtonPress = nowTime;
     }
-    lastOkState = currentOkState;
 
-    // BACK button untuk cancel password
-    if (digitalRead(BACK_BTN) == LOW && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
+    if (readButton(BACK_BTN, lastBackState, lastBackPress)) {
       inputPassword = false;
       inMenu = false;
       lcd.clear();
-      lastButtonPress = nowTime;
     }
 
   } else if (inMenu) {
     if (!inCekSuhu && !inKalibSuhu && !inSetBatasSuhu) {
-      bool currentOkState = digitalRead(OK_BTN);
-      bool currentBackState = digitalRead(BACK_BTN);
-      unsigned long nowTime = millis();
-
-      if (digitalRead(UP_BTN) == LOW) {
+      // Main menu navigation - DIPERBAIKI: Tampilan 2 baris
+      if (readButtonRepeat(UP_BTN, lastUpState, lastUpPress)) {
         curMenu--;
         if (curMenu < 0) curMenu = 7;
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print(">");
-        lcd.setCursor(1, 0);
-        lcd.print(menuItems[curMenu]);
-        delay(200);
+        displayMenu();
       }
-      if (digitalRead(DOWN_BTN) == LOW) {
+
+      if (readButtonRepeat(DOWN_BTN, lastDownState, lastDownPress)) {
         curMenu++;
         if (curMenu > 7) curMenu = 0;
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print(">");
-        lcd.setCursor(1, 0);
-        lcd.print(menuItems[curMenu]);
-        delay(200);
+        displayMenu();
       }
 
-      if (currentOkState == LOW && lastOkState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
-        if (curMenu == 0) {
-          inCekSuhu = true;
-          lcd.clear();
-        } else if (curMenu == 1) {
-          inKalibSuhu = true;
-          curDigit = 0;
-          lcd.clear();
-          lcd.setCursor(0, 0);
-          lcd.print("Kalib Suhu:");
-          lastBlinkTime = millis();
-        } else if (curMenu == 2) {
-          inSetBatasSuhu = true;
-          curDigit = 0;
-          lcd.clear();
-          lcd.setCursor(0, 0);
-          lcd.print("Set Batas Suhu:");
-
-          // Ambil nilai terakhir ke buffer digit
-          batasBuffer[0] = batasSuhu / 10;  // puluhan
-          batasBuffer[1] = batasSuhu % 10;  // satuan
-
-          lcd.setCursor(0, 1);
-          lcd.print(batasBuffer[0]);
-          lcd.print(batasBuffer[1]);
-
-          lastBlinkTime = millis();
-        } else if (curMenu == 3) {  // Sub-menu Waktu (RTC)
-          lcd.clear();
-          bool inWaktu = true;
-          unsigned long pressStart = 0;
-          bool backPressed = false;
-
-          while (inWaktu) {
-            bool currentBackState = digitalRead(BACK_BTN);
-            unsigned long nowTime = millis();
-            DateTime now = rtc.now();
-
-            lcd.setCursor(0, 0);
-            switch (now.dayOfTheWeek()) {
-              case 0: lcd.print("Minggu "); break;
-              case 1: lcd.print("Senin "); break;
-              case 2: lcd.print("Selasa "); break;
-              case 3: lcd.print("Rabu "); break;
-              case 4: lcd.print("Kamis "); break;
-              case 5: lcd.print("Jumat "); break;
-              case 6: lcd.print("Sabtu "); break;
-            }
-            if (now.day() < 10) lcd.print('0');
-            lcd.print(now.day());
-            lcd.print('/');
-            if (now.month() < 10) lcd.print('0');
-            lcd.print(now.month());
-            lcd.print('/');
-            lcd.print(now.year());
-
-            lcd.setCursor(0, 1);
-            if (now.hour() < 10) lcd.print('0');
-            lcd.print(now.hour());
-            lcd.print(':');
-            if (now.minute() < 10) lcd.print('0');
-            lcd.print(now.minute());
-            lcd.print(':');
-            if (now.second() < 10) lcd.print('0');
-            lcd.print(now.second());
-
-            // deteksi awal tombol back ditekan
-            if (currentBackState == LOW && lastBackState == HIGH) {
-              pressStart = nowTime;
-              backPressed = true;
-            }
-            // deteksi tombol back dilepas
-            if (currentBackState == HIGH && lastBackState == LOW && backPressed) {
-              unsigned long pressDuration = nowTime - pressStart;
-              if (pressDuration >= 50) {  // baik short press maupun long press → sama
-                inWaktu = false;
-                lcd.clear();
-                lcd.setCursor(0, 0);
-                lcd.print(">");
-                lcd.setCursor(1, 0);
-                lcd.print(menuItems[curMenu]);
-              }
-              backPressed = false;
-            }
-
-            lastBackState = currentBackState;
-            delay(100);
-          }
-        } else if (curMenu == 4) {  // Sub-menu Kalib RTC
-          lcd.clear();
-          if (WiFi.status() != WL_CONNECTED) {
-            int jam = now.hour();
-            int menit = now.minute();
-            int detik = now.second();
-            int curDigitRTC = 0;  // 0=jam,1=menit,2=detik
-            bool inKalibRTC = true;
-
-            while (inKalibRTC) {
-              // Baris 0: keterangan
-              lcd.setCursor(0, 0);
-              lcd.print("Kalib RTC:");
-
-              // Baris 1: tampil jam:menit:detik dengan cursor kedip
-              lcd.setCursor(0, 1);
-              if (curDigitRTC == 0 && blinkState) lcd.print("__");
-              else {
-                if (jam < 10) lcd.print('0');
-                lcd.print(jam);
-              }
-              lcd.print(':');
-              if (curDigitRTC == 1 && blinkState) lcd.print("__");
-              else {
-                if (menit < 10) lcd.print('0');
-                lcd.print(menit);
-              }
-              lcd.print(':');
-              if (curDigitRTC == 2 && blinkState) lcd.print("__");
-              else {
-                if (detik < 10) lcd.print('0');
-                lcd.print(detik);
-              }
-
-              // Update blink
-              if (nowTime - lastBlinkTime >= blinkInterval) {
-                blinkState = !blinkState;
-                lastBlinkTime = nowTime;
-              }
-
-              // Tombol UP/DOWN
-              if (digitalRead(UP_BTN) == LOW) {
-                if (curDigitRTC == 0) {
-                  jam++;
-                  if (jam > 23) jam = 0;
-                } else if (curDigitRTC == 1) {
-                  menit++;
-                  if (menit > 59) menit = 0;
-                } else if (curDigitRTC == 2) {
-                  detik++;
-                  if (detik > 59) detik = 0;
-                }
-                delay(100);
-              }
-              if (digitalRead(DOWN_BTN) == LOW) {
-                if (curDigitRTC == 0) {
-                  jam--;
-                  if (jam < 0) jam = 23;
-                } else if (curDigitRTC == 1) {
-                  menit--;
-                  if (menit < 0) menit = 59;
-                } else if (curDigitRTC == 2) {
-                  detik--;
-                  if (detik < 0) detik = 59;
-                }
-                delay(100);
-              }
-
-              // Tombol OK pindah digit
-              if (currentOkState == LOW && lastOkState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
-                curDigitRTC++;
-                if (curDigitRTC > 2) {  // Selesai kalibrasi
-                  rtc.adjust(DateTime(now.year(), now.month(), now.day(), jam, menit, detik));
-                  inKalibRTC = false;
-                  lcd.clear();
-                  lcd.setCursor(0, 0);
-                  lcd.print("Simpan OK");
-                  delay(500);
-                  lcd.clear();
-                  lcd.setCursor(0, 0);
-                  lcd.print(">");
-                  lcd.setCursor(1, 0);
-                  lcd.print(menuItems[curMenu]);
-                }
-              }
-              lastOkState = currentOkState;
-
-              // Tombol BACK batal kalibrasi
-              if (currentBackState == LOW && lastBackState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
-                inKalibRTC = false;
-                delay(200);
-                lcd.clear();
-                lcd.setCursor(0, 0);
-                lcd.print(">");
-                lcd.setCursor(1, 0);
-                lcd.print(menuItems[curMenu]);
-                lastButtonPress = nowTime;
-              }
-              lastBackState = currentBackState;
-            }
-          } else {
-            lcd.setCursor(0, 0);
-            lcd.print("Anda Terhubung");
-            lcd.setCursor(0, 1);
-            lcd.print("WiFi !!!!!!!!!");
-            delay(2000);
-            inMenu = false;  // keluar dari menu
-            lcd.clear();     // balik ke tampilan awal
-          }
-        } else if (curMenu == 5) {  // Sub-menu set jadwal
-          lcd.clear();
-          menuSetJadwalP1();
-        } else if (curMenu == 6) {  // Sub-menu Set Password
-          lcd.clear();
-          int newPass[4] = { 0, 0, 0, 0 };
-          int curDigitPass = 0;
-          bool inSetPass = true;
-          lastBlinkTime = millis();
-          blinkState = false;
-
-          while (inSetPass) {
-            lcd.setCursor(0, 0);
-            lcd.print("Set Password:");
-
-            // Tampilkan password dengan cursor berkedip
-            for (int i = 0; i < 4; i++) {
-              lcd.setCursor(i * 2, 1);
-              if (i == curDigitPass && blinkState) lcd.print('_');
-              else lcd.print(newPass[i]);
-            }
-
-            // Blink update
-            if (nowTime - lastBlinkTime >= blinkInterval) {
-              blinkState = !blinkState;
-              lastBlinkTime = nowTime;
-            }
-
-            // Tombol UP
-            if (digitalRead(UP_BTN) == LOW) {
-              newPass[curDigitPass]++;
-              if (newPass[curDigitPass] > 9) newPass[curDigitPass] = 0;
-              delay(100);
-            }
-            // Tombol DOWN
-            if (digitalRead(DOWN_BTN) == LOW) {
-              newPass[curDigitPass]--;
-              if (newPass[curDigitPass] < 0) newPass[curDigitPass] = 9;
-              delay(100);
-            }
-            // Tombol OK
-            if (currentOkState == LOW && lastOkState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
-              curDigitPass++;
-              if (curDigitPass > 3) {
-                // Simpan password baru
-                for (int i = 0; i < 4; i++) password[i] = newPass[i];
-                lcd.clear();
-                lcd.setCursor(0, 0);
-                lcd.print("Password Tersimpan");
-                delay(1000);
-                lcd.clear();
-                lcd.setCursor(0, 0);
-                lcd.print(">");
-                lcd.setCursor(1, 0);
-                lcd.print(menuItems[curMenu]);
-                inSetPass = false;
-              }
-              lastButtonPress = nowTime;
-            }
-            // Tombol BACK
-            if (currentBackState == LOW && lastBackState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
-              inSetPass = false;
-              lcd.clear();
-              lcd.setCursor(0, 0);
-              lcd.print(">");
-              lcd.setCursor(1, 0);
-              lcd.print(menuItems[curMenu]);
-              lastButtonPress = nowTime;
-            }
-            lastBackState = currentBackState;
-          }
-        } else if (curMenu == 7) {  // Sub-menu Upload Program
-          animasiUpload();
-          inMenu = false;  // keluar dari menu
-          lcd.clear();     // balik ke tampilan awal
-        }
-        lastButtonPress = nowTime;
+      if (readButton(OK_BTN, lastOkState, lastOkPress)) {
+        handleMenuSelection();
       }
 
-      if (currentBackState == LOW && lastBackState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
+      if (readButton(BACK_BTN, lastBackState, lastBackPress)) {
         inMenu = false;
         lcd.clear();
-        lastButtonPress = nowTime;
       }
-      lastOkState = currentOkState;
-      lastBackState = currentBackState;
     }
 
-    // ---------- Sub-menu Cek Suhu ----------
-    else if (inCekSuhu) {
-      lcd.setCursor(0, 0);
-      lcd.print("Suhu: ");
-      float displayT = T + kalibSuhu;
-      if (isnan(displayT)) lcd.print("Err ");
-      else lcd.print(displayT);
-      lcd.print((char)223);
-      lcd.print("C");
+    // Handle submenu states
+    handleSubMenus();
 
-      bool currentBackState = digitalRead(BACK_BTN);
-      unsigned long nowTime = millis();
-      if (currentBackState == LOW && lastBackState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
-        inCekSuhu = false;
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print(">");
-        lcd.setCursor(1, 0);
-        lcd.print(menuItems[curMenu]);
-        lastButtonPress = nowTime;
-      }
-      lastBackState = currentBackState;
-    }
-
-    // ---------- Sub-menu Kalib Suhu ----------
-    else if (inKalibSuhu) {
-      bool currentBackState = digitalRead(BACK_BTN);
-      unsigned long nowTime = millis();
-      if (nowTime - lastBlinkTime >= blinkInterval) {
-        blinkState = !blinkState;
-        lastBlinkTime = nowTime;
-        // ± dan dua digit
-        lcd.setCursor(0, 1);
-        if (curDigit == 0 && blinkState) lcd.print('_');
-        else lcd.print(kalibSuhu < 0 ? '-' : '+');
-        int absVal = abs(kalibSuhu);
-        int puluhan = absVal / 10;
-        int satuan = absVal % 10;
-        lcd.setCursor(1, 1);
-        if (curDigit == 1 && blinkState) lcd.print('_');
-        else lcd.print(puluhan);
-        lcd.setCursor(2, 1);
-        if (curDigit == 2 && blinkState) lcd.print('_');
-        else lcd.print(satuan);
-      }
-
-      // Tombol UP/DOWN untuk ±
-      updateKalibSuhu();
-
-      if (digitalRead(OK_BTN) == LOW) {
-        delay(50);
-        curDigit++;
-        if (curDigit > 2) {
-          inKalibSuhu = false;
-          lcd.clear();
-          lcd.setCursor(0, 0);
-          lcd.print("Simpan OK");
-          delay(500);
-          lcd.clear();
-          lcd.setCursor(0, 0);
-          lcd.print(">");
-          lcd.setCursor(1, 0);
-          lcd.print(menuItems[curMenu]);
-        }
-      }
-
-      if (currentBackState == LOW && lastBackState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
-        inKalibSuhu = false;
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print(">");
-        lcd.setCursor(1, 0);
-        lcd.print(menuItems[curMenu]);
-        lastButtonPress = nowTime;
-      }
-      lastBackState = currentBackState;
-    }
-
-    // ---------- Sub-menu Set Batas Suhu ----------
-    else if (inSetBatasSuhu) {
-      bool currentBackState = digitalRead(BACK_BTN);
-      unsigned long nowTime = millis();
-      if (nowTime - lastBlinkTime >= blinkInterval) {
-        blinkState = !blinkState;
-        lastBlinkTime = nowTime;
-        lcd.setCursor(curDigit, 1);
-        if (blinkState) lcd.print('_');
-        else lcd.print(batasBuffer[curDigit]);
-      }
-
-      if (digitalRead(UP_BTN) == LOW) {
-        batasBuffer[curDigit]++;
-        if (batasBuffer[curDigit] > 9) batasBuffer[curDigit] = 0;
-        lcd.setCursor(curDigit, 1);
-        lcd.print(batasBuffer[curDigit]);
-        delay(100);
-      }
-      if (digitalRead(DOWN_BTN) == LOW) {
-        batasBuffer[curDigit]--;
-        if (batasBuffer[curDigit] < 0) batasBuffer[curDigit] = 9;
-        lcd.setCursor(curDigit, 1);
-        lcd.print(batasBuffer[curDigit]);
-        delay(100);
-      }
-
-      if (digitalRead(OK_BTN) == LOW) {
-        delay(50);
-        curDigit++;
-        if (curDigit > 1) {
-          inSetBatasSuhu = false;
-          batasSuhu = batasBuffer[0] * 10 + batasBuffer[1];
-          lcd.clear();
-          lcd.setCursor(0, 0);
-          lcd.print("Simpan OK");
-          delay(500);
-          lcd.clear();
-          lcd.setCursor(0, 0);
-          lcd.print(">");
-          lcd.setCursor(1, 0);
-          lcd.print(menuItems[curMenu]);
-        } else lcd.setCursor(curDigit, 1);
-      }
-
-      if (currentBackState == LOW && lastBackState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
-        inSetBatasSuhu = false;
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print(">");
-        lcd.setCursor(1, 0);
-        lcd.print(menuItems[curMenu]);
-        lastButtonPress = nowTime;
-      }
-      lastBackState = currentBackState;
-    }
-
-    // ---------- Tampilan Awal ----------
   } else {
+    // Display utama
+    displayMainScreen();
+
+    // Check for password input
+    if (readButton(OK_BTN, lastOkState, lastOkPress)) {
+      startPasswordInput();
+    }
+
+    // Mode toggle button
+    if (readButton(MODE_BTN, lastModeState, lastModePress)) {
+      modeManual = !modeManual;
+      digitalWrite(LED_AUTO, !modeManual);
+      digitalWrite(LED_MANUAL, modeManual);
+      digitalWrite(RELAY_MANUAL, modeManual ? LOW : HIGH);
+
+      if (Blynk.connected()) {
+        Blynk.virtualWrite(V0, modeManual ? 1 : 0);
+      }
+    }
+  }
+
+  delay(50);  // Small delay for stability
+}
+
+void displayMenu() {
+  lcd.clear();
+
+  // Tentukan item menu yang akan ditampilkan
+  int firstItem = curMenu;
+  int secondItem = (curMenu + 1) % 8;  // 8 total menu items
+
+  // Baris pertama (menu yang sedang dipilih)
+  lcd.setCursor(0, 0);
+  lcd.print(">");
+  lcd.setCursor(1, 0);
+  lcd.print(menuItems[firstItem]);
+
+  // Baris kedua (menu selanjutnya)
+  lcd.setCursor(0, 1);
+  lcd.print(" ");  // spasi untuk menunjukkan tidak dipilih
+  lcd.setCursor(1, 1);
+  lcd.print(menuItems[secondItem]);
+}
+
+void handleMenuSelection() {
+  if (curMenu == 0) {
+    inCekSuhu = true;
+    lcd.clear();
+  } else if (curMenu == 1) {
+    inKalibSuhu = true;
+    curDigit = 0;
+    lcd.clear();
     lcd.setCursor(0, 0);
-    lcd.print("T:");
+    lcd.print("Kalib Suhu:");
+    lastBlinkTime = millis();
+  } else if (curMenu == 2) {
+    inSetBatasSuhu = true;
+    curDigit = 0;
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Set Batas Suhu:");
+    batasBuffer[0] = batasSuhu / 10;
+    batasBuffer[1] = batasSuhu % 10;
+    lcd.setCursor(0, 1);
+    lcd.print(batasBuffer[0]);
+    lcd.print(batasBuffer[1]);
+    lastBlinkTime = millis();
+  } else if (curMenu == 3) {
+    handleTimeMenu();
+  } else if (curMenu == 4) {
+    handleRTCCalibMenu();
+  } else if (curMenu == 5) {
+    lcd.clear();
+    menuSetJadwalP1();
+  } else if (curMenu == 6) {
+    handlePasswordSetMenu();
+  } else if (curMenu == 7) {
+    animasiUpload();
+    inMenu = false;
+    lcd.clear();
+  }
+}
+
+void handleSubMenus() {
+  if (inCekSuhu) {
+    lcd.setCursor(0, 0);
+    lcd.print("Suhu: ");
     float displayT = T + kalibSuhu;
-    DateTime now = rtc.now();
     if (isnan(displayT)) lcd.print("Err ");
     else lcd.print(displayT);
     lcd.print((char)223);
-    lcd.print("C ");
-    lcd.setCursor(10, 0);
-    lcd.print(modeManual ? "Manual" : "  Auto");
+    lcd.print("C");
 
-    lcd.setCursor(0, 1);
+    if (readButton(BACK_BTN, lastBackState, lastBackPress)) {
+      inCekSuhu = false;
+      displayMenu();  // DIPERBAIKI: Gunakan displayMenu()
+    }
+  }
+
+  else if (inKalibSuhu) {
+    unsigned long nowTime = millis();
+    if (nowTime - lastBlinkTime >= blinkInterval) {
+      blinkState = !blinkState;
+      lastBlinkTime = nowTime;
+
+      lcd.setCursor(0, 1);
+      if (curDigit == 0 && blinkState) lcd.print('_');
+      else lcd.print(kalibSuhu < 0 ? '-' : '+');
+
+      int absVal = abs(kalibSuhu);
+      int puluhan = absVal / 10;
+      int satuan = absVal % 10;
+
+      lcd.setCursor(1, 1);
+      if (curDigit == 1 && blinkState) lcd.print('_');
+      else lcd.print(puluhan);
+
+      lcd.setCursor(2, 1);
+      if (curDigit == 2 && blinkState) lcd.print('_');
+      else lcd.print(satuan);
+    }
+
+    updateKalibSuhu();
+
+    if (readButton(OK_BTN, lastOkState, lastOkPress)) {
+      curDigit++;
+      if (curDigit > 2) {
+        inKalibSuhu = false;
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Simpan OK");
+        delay(500);
+        displayMenu();  // DIPERBAIKI: Gunakan displayMenu()
+      }
+    }
+
+    if (readButton(BACK_BTN, lastBackState, lastBackPress)) {
+      inKalibSuhu = false;
+      displayMenu();  // DIPERBAIKI: Gunakan displayMenu()
+    }
+  }
+
+  else if (inSetBatasSuhu) {
+    unsigned long nowTime = millis();
+    if (nowTime - lastBlinkTime >= blinkInterval) {
+      blinkState = !blinkState;
+      lastBlinkTime = nowTime;
+      lcd.setCursor(curDigit, 1);
+      if (blinkState) lcd.print('_');
+      else lcd.print(batasBuffer[curDigit]);
+    }
+
+    if (readButtonRepeat(UP_BTN, lastUpState, lastUpPress)) {
+      batasBuffer[curDigit]++;
+      if (batasBuffer[curDigit] > 9) batasBuffer[curDigit] = 0;
+      lcd.setCursor(curDigit, 1);
+      lcd.print(batasBuffer[curDigit]);
+    }
+
+    if (readButtonRepeat(DOWN_BTN, lastDownState, lastDownPress)) {
+      batasBuffer[curDigit]--;
+      if (batasBuffer[curDigit] < 0) batasBuffer[curDigit] = 9;
+      lcd.setCursor(curDigit, 1);
+      lcd.print(batasBuffer[curDigit]);
+    }
+
+    if (readButton(OK_BTN, lastOkState, lastOkPress)) {
+      curDigit++;
+      if (curDigit > 1) {
+        inSetBatasSuhu = false;
+        batasSuhu = batasBuffer[0] * 10 + batasBuffer[1];
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Simpan OK");
+        delay(500);
+        displayMenu();  // DIPERBAIKI: Gunakan displayMenu()
+      } else {
+        lcd.setCursor(curDigit, 1);
+      }
+    }
+
+    if (readButton(BACK_BTN, lastBackState, lastBackPress)) {
+      inSetBatasSuhu = false;
+      displayMenu();  // DIPERBAIKI: Gunakan displayMenu()
+    }
+  }
+}
+
+// DIPERBAIKI: Handle Time Menu
+void handleTimeMenu() {
+  lcd.clear();
+  bool inWaktu = true;
+
+  while (inWaktu) {
+    DateTime now = rtc.now();
+
+    lcd.setCursor(0, 0);
+    switch (now.dayOfTheWeek()) {
+      case 0: lcd.print("Minggu "); break;
+      case 1: lcd.print("Senin "); break;
+      case 2: lcd.print("Selasa "); break;
+      case 3: lcd.print("Rabu "); break;
+      case 4: lcd.print("Kamis "); break;
+      case 5: lcd.print("Jumat "); break;
+      case 6: lcd.print("Sabtu "); break;
+    }
+
     if (now.day() < 10) lcd.print('0');
     lcd.print(now.day());
     lcd.print('/');
     if (now.month() < 10) lcd.print('0');
     lcd.print(now.month());
-    lcd.print("   ");
+    lcd.print('/');
+    lcd.print(now.year());
+
+    lcd.setCursor(0, 1);
     if (now.hour() < 10) lcd.print('0');
     lcd.print(now.hour());
     lcd.print(':');
@@ -1062,39 +850,214 @@ void Seluruhnya() {
     if (now.second() < 10) lcd.print('0');
     lcd.print(now.second());
 
-    bool currentOkState = digitalRead(OK_BTN);
-    if (currentOkState == LOW && lastOkState == HIGH && (nowTime - lastButtonPress > DEBOUNCE_DELAY)) {
-      inputPassword = true;
-      curDigit = 0;
-      blinkState = true;  // Mulai dengan menampilkan angka, bukan underscore
-      for (int i = 0; i < 4; i++) inputBuffer[i] = 0;
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("Password:");
-      for (int i = 0; i < 4; i++) {
-        lcd.setCursor(i * 2, 1);
-        lcd.print(inputBuffer[i]);
-      }
+    if (readButton(BACK_BTN, lastBackState, lastBackPress)) {
+      inWaktu = false;
+      displayMenu();  // DIPERBAIKI: Gunakan displayMenu()
     }
-    lastOkState = currentOkState;
 
-    // Tombol mode Auto/Manual
-    // Tombol mode Auto/Manual fisik
-    if (digitalRead(MODE_BTN) == LOW) {
-      modeManual = !modeManual;  // toggle mode
-      digitalWrite(LED_AUTO, !modeManual);
-      digitalWrite(LED_MANUAL, modeManual);
-      digitalWrite(RELAY_MANUAL, modeManual ? LOW : HIGH);
-
-      // update Blynk juga
-      if (Blynk.connected()) {
-        Blynk.virtualWrite(V0, modeManual ? 1 : 0);
-      }
-      delay(50);  // debounce
-    }
-    delay(200);
+    delay(100);
   }
 }
+
+// DIPERBAIKI: Handle RTC Calibration Menu
+void handleRTCCalibMenu() {
+  lcd.clear();
+  if (WiFi.status() != WL_CONNECTED) {
+    DateTime now = rtc.now();
+    int jam = now.hour();
+    int menit = now.minute();
+    int detik = now.second();
+    int curDigitRTC = 0;
+    bool inKalibRTC = true;
+
+    while (inKalibRTC) {
+      lcd.setCursor(0, 0);
+      lcd.print("Kalib RTC:");
+
+      lcd.setCursor(0, 1);
+      if (curDigitRTC == 0 && blinkState) lcd.print("__");
+      else {
+        if (jam < 10) lcd.print('0');
+        lcd.print(jam);
+      }
+      lcd.print(':');
+      if (curDigitRTC == 1 && blinkState) lcd.print("__");
+      else {
+        if (menit < 10) lcd.print('0');
+        lcd.print(menit);
+      }
+      lcd.print(':');
+      if (curDigitRTC == 2 && blinkState) lcd.print("__");
+      else {
+        if (detik < 10) lcd.print('0');
+        lcd.print(detik);
+      }
+
+      unsigned long nowTime = millis();
+      if (nowTime - lastBlinkTime >= blinkInterval) {
+        blinkState = !blinkState;
+        lastBlinkTime = nowTime;
+      }
+
+      if (readButtonRepeat(UP_BTN, lastUpState, lastUpPress)) {
+        if (curDigitRTC == 0) {
+          jam++;
+          if (jam > 23) jam = 0;
+        } else if (curDigitRTC == 1) {
+          menit++;
+          if (menit > 59) menit = 0;
+        } else if (curDigitRTC == 2) {
+          detik++;
+          if (detik > 59) detik = 0;
+        }
+      }
+
+      if (readButtonRepeat(DOWN_BTN, lastDownState, lastDownPress)) {
+        if (curDigitRTC == 0) {
+          jam--;
+          if (jam < 0) jam = 23;
+        } else if (curDigitRTC == 1) {
+          menit--;
+          if (menit < 0) menit = 59;
+        } else if (curDigitRTC == 2) {
+          detik--;
+          if (detik < 0) detik = 59;
+        }
+      }
+
+      if (readButton(OK_BTN, lastOkState, lastOkPress)) {
+        curDigitRTC++;
+        if (curDigitRTC > 2) {
+          rtc.adjust(DateTime(now.year(), now.month(), now.day(), jam, menit, detik));
+          inKalibRTC = false;
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print("Simpan OK");
+          delay(500);
+          displayMenu();  
+        }
+      }
+
+      if (readButton(BACK_BTN, lastBackState, lastBackPress)) {
+        inKalibRTC = false;
+        displayMenu();  
+      }
+
+      delay(50);
+    }
+  } else {
+    lcd.setCursor(0, 0);
+    lcd.print("Anda Terhubung");
+    lcd.setCursor(0, 1);
+    lcd.print("WiFi !!!!!!!!!");
+    delay(2000);
+    inMenu = false;
+    lcd.clear();
+  }
+}
+
+void handlePasswordSetMenu() {
+  lcd.clear();
+  int newPass[4] = { 0, 0, 0, 0 };
+  int curDigitPass = 0;
+  bool inSetPass = true;
+  lastBlinkTime = millis();
+  blinkState = false;
+
+  while (inSetPass) {
+    lcd.setCursor(0, 0);
+    lcd.print("Set Password:");
+
+    for (int i = 0; i < 4; i++) {
+      lcd.setCursor(i * 2, 1);
+      if (i == curDigitPass && blinkState) lcd.print('_');
+      else lcd.print(newPass[i]);
+    }
+
+    unsigned long nowTime = millis();
+    if (nowTime - lastBlinkTime >= blinkInterval) {
+      blinkState = !blinkState;
+      lastBlinkTime = nowTime;
+    }
+
+    if (readButtonRepeat(UP_BTN, lastUpState, lastUpPress)) {
+      newPass[curDigitPass]++;
+      if (newPass[curDigitPass] > 9) newPass[curDigitPass] = 0;
+    }
+
+    if (readButtonRepeat(DOWN_BTN, lastDownState, lastDownPress)) {
+      newPass[curDigitPass]--;
+      if (newPass[curDigitPass] < 0) newPass[curDigitPass] = 9;
+    }
+
+    if (readButton(OK_BTN, lastOkState, lastOkPress)) {
+      curDigitPass++;
+      if (curDigitPass > 3) {
+        for (int i = 0; i < 4; i++) password[i] = newPass[i];
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Password Tersimpan");
+        delay(1000);
+        displayMenu();  
+        inSetPass = false;
+      }
+    }
+
+    if (readButton(BACK_BTN, lastBackState, lastBackPress)) {
+      inSetPass = false;
+      displayMenu();  
+    }
+
+    delay(50);
+  }
+}
+
+void displayMainScreen() {
+  lcd.setCursor(0, 0);
+  lcd.print("T:");
+  float displayT = T + kalibSuhu;
+  DateTime now = rtc.now();
+
+  if (isnan(displayT)) lcd.print("Err ");
+  else lcd.print(displayT);
+  lcd.print((char)223);
+  lcd.print("C ");
+  lcd.setCursor(10, 0);
+  lcd.print(modeManual ? "Manual" : "  Auto");
+
+  lcd.setCursor(0, 1);
+  if (now.day() < 10) lcd.print('0');
+  lcd.print(now.day());
+  lcd.print('/');
+  if (now.month() < 10) lcd.print('0');
+  lcd.print(now.month());
+  lcd.print("   ");
+  if (now.hour() < 10) lcd.print('0');
+  lcd.print(now.hour());
+  lcd.print(':');
+  if (now.minute() < 10) lcd.print('0');
+  lcd.print(now.minute());
+  lcd.print(':');
+  if (now.second() < 10) lcd.print('0');
+  lcd.print(now.second());
+}
+
+void startPasswordInput() {
+  inputPassword = true;
+  curDigit = 0;
+  blinkState = true;
+  for (int i = 0; i < 4; i++) inputBuffer[i] = 0;
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Password:");
+  for (int i = 0; i < 4; i++) {
+    lcd.setCursor(i * 2, 1);
+    lcd.print(inputBuffer[i]);
+  }
+  lastBlinkTime = millis();
+}
+
 // ----------- SIMPAN DATA KE EEPROM -----------
 void saveSettings() {
   EEPROM.put(ADDR_KALIBSUHU, kalibSuhu);
@@ -1103,7 +1066,6 @@ void saveSettings() {
   EEPROM.put(ADDR_JADWALMENIT, jadwalMenit);
   EEPROM.put(ADDR_DURASI, durasiMenit);
   EEPROM.put(ADDR_PASSWORD, password);
-
   EEPROM.commit();
 }
 
@@ -1116,20 +1078,21 @@ void loadSettings() {
   EEPROM.get(ADDR_DURASI, durasiMenit);
   EEPROM.get(ADDR_PASSWORD, password);
 
-  // Cek validasi (jaga-jaga kalau EEPROM kosong)
-  if (batasSuhu <= 0 || batasSuhu > 99) batasSuhu = 28;  // default
-  if (kalibSuhu < -50 || kalibSuhu > 50) kalibSuhu = 0;  // default
+  // Validasi data
+  if (batasSuhu <= 0 || batasSuhu > 99) batasSuhu = 28;
+  if (kalibSuhu < -50 || kalibSuhu > 50) kalibSuhu = 0;
+
   for (int i = 0; i < 2; i++) {
     if (jadwalJam[i] < 0 || jadwalJam[i] > 23) jadwalJam[i] = (i == 0 ? 8 : 20);
     if (jadwalMenit[i] < 0 || jadwalMenit[i] > 59) jadwalMenit[i] = 0;
     if (durasiMenit[i] <= 0 || durasiMenit[i] > 59) durasiMenit[i] = 1;
   }
+
   for (int i = 0; i < 4; i++) {
-    if (password[i] < 0 || password[i] > 9) password[i] = i + 1;  // default 1234
+    if (password[i] < 0 || password[i] > 9) password[i] = i + 1;
   }
 }
 
-// Fungsi helper
 void displayDigitAtPosition(int position, bool showDigit) {
   lcd.setCursor(position * 2, 1);
   if (showDigit) {
@@ -1181,7 +1144,7 @@ void resetPasswordInput() {
     inputBuffer[i] = 0;
   }
   curDigit = 0;
-  blinkState = true;  // TAMBAHAN: Mulai dengan menampilkan angka
+  blinkState = true;
 
   lcd.clear();
   lcd.setCursor(0, 0);
