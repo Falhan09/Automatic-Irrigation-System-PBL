@@ -112,7 +112,7 @@ int batasBuffer[2] = { 2, 8 };  //untuk Menyimpan data suhu karena 2 digit
 // ---------- Jadwal P1 ----------
 int jadwalJam[2] = { 8, 20 };                  // default jam mulai
 int jadwalMenit[2] = { 0, 0 };                 // default menit mulai
-int durasiMenit[2] = { 1, 1 };                 // durasi aktif relay dalam menit
+int durasiDetik[2] = { 1, 1 };                 // durasi aktif relay dalam menit
 bool relayOn[2] = { false, false };            // status relay tiap jadwal
 unsigned long relayStartMillis[2] = { 0, 0 };  // waktu mulai relay
 unsigned long lastBlynkUpdate = 0;
@@ -240,13 +240,12 @@ void setup() {
   Blynk.syncVirtual(V0, !modeManual);
 
   lcd.setCursor(0, 0);
-  lcd.print("   SISTEM START  ");
+  lcd.print("  SISTEM START  ");
   lcd.setCursor(0, 1);
-  lcd.print("     Loading...  ");
+  lcd.print("   Loading...  ");
   delay(2000);
   lcd.clear();
 }
-
 
 // ---------- Fungsi update relay & LED ----------
 void updateRelayAndLed() {
@@ -256,31 +255,56 @@ void updateRelayAndLed() {
   // Kondisi relay berdasarkan suhu
   bool relaySuhu = (T + kalibSuhu >= batasSuhu);
 
-  // Kondisi relay berdasarkan jadwal
+  // Kondisi relay berdasarkan jadwal - default relay OFF (HIGH)
+  relayJadwal = true; // TRUE = relay OFF (HIGH)
+  
+  // Cek apakah ada jadwal yang sedang aktif
+  bool adaJadwalAktif = false;
   for (int i = 0; i < 2; i++) {
     if (relayOn[i]) {
-      relayJadwal = false;
-      // Cek durasi jadwal
+      // Cek durasi jadwal - dalam satuan 10 detik
       unsigned long elapsed = millis() - relayStartMillis[i];
-      if (elapsed >= durasiMenit[i] * 60000UL) {  //ini 60000 = 1 menit, kalau mau detik ubah saja jadi 1000
+      unsigned long durasiMillis = durasiDetik[i] * 10000UL; // 10 detik = 10000 ms
+      
+      if (elapsed >= durasiMillis) {
+        // Durasi sudah habis, matikan relay
         relayOn[i] = false;
-        relayJadwal = true;
+      } else {
+        // Masih dalam durasi, relay harus ON
+        adaJadwalAktif = true;
       }
     }
   }
+  
+  // Jika ada jadwal yang masih aktif, nyalakan relay (LOW)
+  if (adaJadwalAktif) {
+    relayJadwal = false; // FALSE = relay ON (LOW)
+  }
 
-  // Relay nyala kalau suhu > batas atau jadwal aktif
-  // digitalWrite(RELAY_POMPA1, relaySuhu || relayJadwal);// "hapus relaySuhu ||" untuk menghilangkan fungsi logika batas suhu
-  digitalWrite(RELAY_POMPA1, relayJadwal);
+  // Update relay pompa (LOW = ON, HIGH = OFF)
+  digitalWrite(RELAY_POMPA1, relayJadwal ? HIGH : LOW);
 }
 
 void updateJadwalP1() {
   DateTime now = rtc.now();
+  static int lastMinute = -1;  // Menyimpan menit terakhir untuk mencegah trigger berulang
+  static bool jadwalTriggered[2] = {false, false}; // Flag untuk setiap jadwal
+  
+  // Reset flag jika menit berubah
+  if (lastMinute != now.minute()) {
+    lastMinute = now.minute();
+    for (int i = 0; i < 2; i++) {
+      jadwalTriggered[i] = false;
+    }
+  }
 
   for (int i = 0; i < 2; i++) {
-    if (now.hour() == jadwalJam[i] && now.minute() == jadwalMenit[i] && !relayOn[i]) {
+    // Hanya trigger jika belum pernah triggered di menit ini dan relay sedang tidak aktif
+    if (now.hour() == jadwalJam[i] && now.minute() == jadwalMenit[i] && 
+        !relayOn[i] && !jadwalTriggered[i]) {
       relayOn[i] = true;
       relayStartMillis[i] = millis();
+      jadwalTriggered[i] = true;  // Tandai sudah triggered untuk menit ini
     }
   }
 }
@@ -310,7 +334,7 @@ void menuSetJadwalP1() {
 
     lcd.print(' ');
     if (curDigitJ == 2 && blinkState) lcd.print("__");
-    else lcd.print(durasiMenit[curJadwal]);
+    else lcd.print(durasiDetik[curJadwal]);
 
     unsigned long nowTime = millis();
     if (nowTime - lastBlinkTime >= blinkInterval) {
@@ -318,7 +342,6 @@ void menuSetJadwalP1() {
       lastBlinkTime = nowTime;
     }
 
-    // DIPERBAIKI: Gunakan fungsi button yang proper
     if (readButtonRepeat(UP_BTN, lastUpState, lastUpPress)) {
       if (curDigitJ == 0) {
         jadwalJam[curJadwal]++;
@@ -327,8 +350,8 @@ void menuSetJadwalP1() {
         jadwalMenit[curJadwal]++;
         if (jadwalMenit[curJadwal] > 59) jadwalMenit[curJadwal] = 0;
       } else {
-        durasiMenit[curJadwal]++;
-        if (durasiMenit[curJadwal] > 59) durasiMenit[curJadwal] = 1;
+        durasiDetik[curJadwal]++;
+        if (durasiDetik[curJadwal] > 9) durasiDetik[curJadwal] = 1;
       }
     }
 
@@ -340,8 +363,8 @@ void menuSetJadwalP1() {
         jadwalMenit[curJadwal]--;
         if (jadwalMenit[curJadwal] < 0) jadwalMenit[curJadwal] = 59;
       } else {
-        durasiMenit[curJadwal]--;
-        if (durasiMenit[curJadwal] < 1) durasiMenit[curJadwal] = 1;
+        durasiDetik[curJadwal]--;
+        if (durasiDetik[curJadwal] < 1) durasiDetik[curJadwal] = 1;
       }
     }
 
@@ -356,14 +379,14 @@ void menuSetJadwalP1() {
           lcd.setCursor(0, 0);
           lcd.print("Jadwal Tersimpan");
           delay(500);
-          displayMenu();  // DIPERBAIKI: Gunakan displayMenu()
+          displayMenu();  
         }
       }
     }
 
     if (readButton(BACK_BTN, lastBackState, lastBackPress)) {
       inJadwal = false;
-      displayMenu();  // DIPERBAIKI: Gunakan displayMenu()
+      displayMenu(); 
     }
 
     delay(50);  // Small delay for stability
@@ -576,7 +599,7 @@ void Seluruhnya() {
           delay(500);
           inMenu = true;
           curMenu = 0;
-          displayMenu();  // DIPERBAIKI: Gunakan displayMenu()
+          displayMenu();  
           inputPassword = false;
         } else {
           lcd.print("Password Salah");
@@ -598,7 +621,7 @@ void Seluruhnya() {
 
   } else if (inMenu) {
     if (!inCekSuhu && !inKalibSuhu && !inSetBatasSuhu) {
-      // Main menu navigation - DIPERBAIKI: Tampilan 2 baris
+      // Main menu navigation 
       if (readButtonRepeat(UP_BTN, lastUpState, lastUpPress)) {
         curMenu--;
         if (curMenu < 0) curMenu = 7;
@@ -720,7 +743,7 @@ void handleSubMenus() {
 
     if (readButton(BACK_BTN, lastBackState, lastBackPress)) {
       inCekSuhu = false;
-      displayMenu();  // DIPERBAIKI: Gunakan displayMenu()
+      displayMenu();  
     }
   }
 
@@ -757,13 +780,13 @@ void handleSubMenus() {
         lcd.setCursor(0, 0);
         lcd.print("Simpan OK");
         delay(500);
-        displayMenu();  // DIPERBAIKI: Gunakan displayMenu()
+        displayMenu();  
       }
     }
 
     if (readButton(BACK_BTN, lastBackState, lastBackPress)) {
       inKalibSuhu = false;
-      displayMenu();  // DIPERBAIKI: Gunakan displayMenu()
+      displayMenu();  
     }
   }
 
@@ -800,7 +823,7 @@ void handleSubMenus() {
         lcd.setCursor(0, 0);
         lcd.print("Simpan OK");
         delay(500);
-        displayMenu();  // DIPERBAIKI: Gunakan displayMenu()
+        displayMenu(); 
       } else {
         lcd.setCursor(curDigit, 1);
       }
@@ -808,12 +831,12 @@ void handleSubMenus() {
 
     if (readButton(BACK_BTN, lastBackState, lastBackPress)) {
       inSetBatasSuhu = false;
-      displayMenu();  // DIPERBAIKI: Gunakan displayMenu()
+      displayMenu();  
     }
   }
 }
 
-// DIPERBAIKI: Handle Time Menu
+// Handle Time Menu
 void handleTimeMenu() {
   lcd.clear();
   bool inWaktu = true;
@@ -852,14 +875,14 @@ void handleTimeMenu() {
 
     if (readButton(BACK_BTN, lastBackState, lastBackPress)) {
       inWaktu = false;
-      displayMenu();  // DIPERBAIKI: Gunakan displayMenu()
+      displayMenu();  
     }
 
     delay(100);
   }
 }
 
-// DIPERBAIKI: Handle RTC Calibration Menu
+// Handle RTC Calibration Menu
 void handleRTCCalibMenu() {
   lcd.clear();
   if (WiFi.status() != WL_CONNECTED) {
@@ -1064,7 +1087,7 @@ void saveSettings() {
   EEPROM.put(ADDR_BATASSUHU, batasSuhu);
   EEPROM.put(ADDR_JADWALJAM, jadwalJam);
   EEPROM.put(ADDR_JADWALMENIT, jadwalMenit);
-  EEPROM.put(ADDR_DURASI, durasiMenit);
+  EEPROM.put(ADDR_DURASI, durasiDetik);
   EEPROM.put(ADDR_PASSWORD, password);
   EEPROM.commit();
 }
@@ -1075,7 +1098,7 @@ void loadSettings() {
   EEPROM.get(ADDR_BATASSUHU, batasSuhu);
   EEPROM.get(ADDR_JADWALJAM, jadwalJam);
   EEPROM.get(ADDR_JADWALMENIT, jadwalMenit);
-  EEPROM.get(ADDR_DURASI, durasiMenit);
+  EEPROM.get(ADDR_DURASI, durasiDetik);
   EEPROM.get(ADDR_PASSWORD, password);
 
   // Validasi data
@@ -1085,7 +1108,7 @@ void loadSettings() {
   for (int i = 0; i < 2; i++) {
     if (jadwalJam[i] < 0 || jadwalJam[i] > 23) jadwalJam[i] = (i == 0 ? 8 : 20);
     if (jadwalMenit[i] < 0 || jadwalMenit[i] > 59) jadwalMenit[i] = 0;
-    if (durasiMenit[i] <= 0 || durasiMenit[i] > 59) durasiMenit[i] = 1;
+    if (durasiDetik[i] <= 0 || durasiDetik[i] > 9) durasiDetik[i] = 1;
   }
 
   for (int i = 0; i < 4; i++) {
