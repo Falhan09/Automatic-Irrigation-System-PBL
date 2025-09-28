@@ -96,7 +96,7 @@ const int blinkInterval = 500;
 
 // Fungsi-fungsi untuk Menu
 const char* menuItems[8] = { "Cek Suhu", "Kalibrasi Suhu", "Set Batas Suhu", "Waktu (RTC)",
-                             "Kalibrasi RTC", "Set Jadwal P1", "Set Password", "Upload Program" };
+                             "Kalibrasi RTC", "Set Jadwal", "Set Password", "Upload Program" };
 int curMenu = 0;
 bool inMenu = false;
 bool inCekSuhu = false;
