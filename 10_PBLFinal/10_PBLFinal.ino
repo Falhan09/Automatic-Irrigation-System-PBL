@@ -1287,6 +1287,7 @@ void enterMainMenu() {
   lcd.setCursor(1, 0);
   lcd.print(menuItems[curMenu]);
 }
+<<<<<<< HEAD
 
 // Fungsi untuk mengirim data ke Blynk hanya jika ada perubahan
 void updateBlynkIfChanged() {
@@ -1325,3 +1326,5 @@ void updateBlynkIfChanged() {
     forceBlynkSync = false;
   }
 }
+=======
+>>>>>>> b242355fecfdb565e76692e4b075ed0efac04d79
