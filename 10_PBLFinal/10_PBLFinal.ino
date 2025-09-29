@@ -1326,5 +1326,3 @@ void updateBlynkIfChanged() {
     forceBlynkSync = false;
   }
 }
-=======
->>>>>>> b242355fecfdb565e76692e4b075ed0efac04d79
