@@ -37,10 +37,9 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 #define OK_BTN 27
 #define RELAY_POMPA1 15
 #define RELAY_MANUAL 5  // Relay untuk indikator mode manual
-#define BTN_MANUAL 25   // Tombol manual pompa
 
 /*Deklarasi Variabel dan Penetapan Fungsi untuk Pembacaan dan Komunikasi NTP*/
-DHT dht(DHTPIN, DHT11);
+DHT dht(DHTPIN, DHTTYPE);
 RTC_DS3231 rtc;
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 7 * 3600, 60000);  // GMT+7 WIB, update tiap 60 detik
@@ -50,8 +49,8 @@ unsigned long lastCheck = 0;
 const long checkInterval = 5000;  // cek wifi tiap 5 detik
 
 /* koneksi internet sesuaikan dengan wifi dilokasi yang akan kita tempatkan*/
-const char* ssid = "Ws-Eletronika";  // ganti sesuai WiFi kamu
-const char* pass = "@bpvppdg25";
+const char* ssid = "p";  // ganti sesuai WiFi kamu
+const char* pass = "pppppppppp";
 const char* auth = BLYNK_AUTH_TOKEN;
 
 /*Flag atau Penanda untuk kondisi*/
@@ -96,7 +95,7 @@ const int blinkInterval = 500;
 
 // Fungsi-fungsi untuk Menu
 const char* menuItems[8] = { "Cek Suhu", "Kalibrasi Suhu", "Set Batas Suhu", "Waktu (RTC)",
-                             "Kalibrasi RTC", "Set Jadwal P1", "Set Password", "Upload Program" };
+                             "Kalibrasi RTC", "Set Jadwal", "Set Password", "Upload Program" };
 int curMenu = 0;
 bool inMenu = false;
 bool inCekSuhu = false;
@@ -115,14 +114,20 @@ int jadwalMenit[2] = { 0, 0 };                 // default menit mulai
 int durasiDetik[2] = { 1, 1 };                 // durasi aktif relay dalam menit
 bool relayOn[2] = { false, false };            // status relay tiap jadwal
 unsigned long relayStartMillis[2] = { 0, 0 };  // waktu mulai relay
-unsigned long lastBlynkUpdate = 0;
-const long blynkInterval = 2000;  // 2 detik
+
 // ---------- WiFi/Blynk reconnect helpers ----------
 unsigned long lastWifiTry = 0;
 unsigned long lastBlynkTry = 0;
 bool pompaManual = false;
 bool lastBtnState = HIGH;
 static bool synced = false;  //flag untuk menyimpan kondisi sinkronisasi waktu ntp dan rtc
+
+// Variables untuk tracking perubahan data sebelum dikirim ke Blynk
+float lastSentTemperature = -999.0;  // Nilai awal yang tidak mungkin
+bool lastSentModeManual = false;
+bool lastSentPompaManual = false;
+bool lastSentRelayState = false;
+bool forceBlynkSync = false;  // Flag untuk force sync saat koneksi baru
 
 // Fungsi untuk membaca tombol dengan debounce yang proper
 bool readButton(int pin, bool& lastState, unsigned long& lastPress) {
@@ -171,8 +176,9 @@ BLYNK_WRITE(V0) {
   digitalWrite(LED_MANUAL, modeManual);
   digitalWrite(RELAY_MANUAL, modeManual ? LOW : HIGH);  // Relay indikator manual
 
-  // Kalau tombol fisik ditekan kemudian update Blynk
-  Blynk.virtualWrite(V0, modeManual ? 1 : 0);
+  // Update tracking variable
+  lastSentModeManual = modeManual;
+  Serial.println("Blynk: Mode received from app - " + String(modeManual ? "Manual" : "Auto"));
 }
 
 // Tombol Pompa dikondisi manual
@@ -180,6 +186,18 @@ BLYNK_WRITE(V2) {
   int v = param.asInt();
   pompaManual = (v != 0);
   digitalWrite(RELAY_POMPA1, pompaManual ? HIGH : LOW);
+  
+  // Update tracking variable
+  lastSentPompaManual = pompaManual;
+  Serial.println("Blynk: Pump received from app - " + String(pompaManual ? "ON" : "OFF"));
+}
+
+// Event ketika Blynk terhubung
+BLYNK_CONNECTED() {
+  Serial.println("Blynk Connected!");
+  forceBlynkSync = true; // Force sync semua data saat koneksi baru
+  // Sync status dari server
+  Blynk.syncVirtual(V0, V2);
 }
 
 /*Fungsi untuk sinkronisasi RTC dan NTP*/
@@ -218,7 +236,6 @@ void setup() {
       ;
   }
   pinMode(RELAY_MANUAL, OUTPUT);
-  pinMode(BTN_MANUAL, INPUT_PULLUP);  // Tombol aktif LOW
   pinMode(MODE_BTN, INPUT_PULLUP);
   pinMode(LED_AUTO, OUTPUT);
   pinMode(LED_MANUAL, OUTPUT);
@@ -251,6 +268,11 @@ void setup() {
 void updateRelayAndLed() {
   digitalWrite(LED_AUTO, !modeManual);
   digitalWrite(LED_MANUAL, modeManual);
+
+  if (modeManual) {
+    // ========== MODE MANUAL ==========
+    return;
+  }
 
   // Kondisi relay berdasarkan suhu
   bool relaySuhu = (T + kalibSuhu >= batasSuhu);
@@ -406,8 +428,10 @@ void menuSetJadwalP1() {
 // ---------- Fungsi kalibrasi ± ----------
 void updateKalibSuhu() {
   if (readButtonRepeat(UP_BTN, lastUpState, lastUpPress)) {
-    if (curDigit == 0) kalibSuhu = -kalibSuhu;
-    else if (curDigit == 1) {
+    if (curDigit == 0) {
+      kalibSuhu = -kalibSuhu;  // Toggle tanda +/-
+    } else if (curDigit == 1) {
+      // Digit puluhan
       int absVal = abs(kalibSuhu);
       int satuan = absVal % 10;
       int puluhan = absVal / 10;
@@ -415,6 +439,7 @@ void updateKalibSuhu() {
       if (puluhan > 9) puluhan = 0;
       kalibSuhu = (kalibSuhu < 0 ? -1 : 1) * (puluhan * 10 + satuan);
     } else if (curDigit == 2) {
+      // Digit satuan
       int absVal = abs(kalibSuhu);
       int puluhan = absVal / 10;
       int satuan = absVal % 10;
@@ -422,11 +447,17 @@ void updateKalibSuhu() {
       if (satuan > 9) satuan = 0;
       kalibSuhu = (kalibSuhu < 0 ? -1 : 1) * (puluhan * 10 + satuan);
     }
+    
+    // Reset blinking seperti menu lainnya
+    blinkState = false;
+    lastBlinkTime = millis();
   }
 
   if (readButtonRepeat(DOWN_BTN, lastDownState, lastDownPress)) {
-    if (curDigit == 0) kalibSuhu = -kalibSuhu;
-    else if (curDigit == 1) {
+    if (curDigit == 0) {
+      kalibSuhu = -kalibSuhu;  // Toggle tanda +/-
+    } else if (curDigit == 1) {
+      // Digit puluhan
       int absVal = abs(kalibSuhu);
       int satuan = absVal % 10;
       int puluhan = absVal / 10;
@@ -434,6 +465,7 @@ void updateKalibSuhu() {
       if (puluhan < 0) puluhan = 9;
       kalibSuhu = (kalibSuhu < 0 ? -1 : 1) * (puluhan * 10 + satuan);
     } else if (curDigit == 2) {
+      // Digit satuan
       int absVal = abs(kalibSuhu);
       int puluhan = absVal / 10;
       int satuan = absVal % 10;
@@ -441,6 +473,10 @@ void updateKalibSuhu() {
       if (satuan < 0) satuan = 9;
       kalibSuhu = (kalibSuhu < 0 ? -1 : 1) * (puluhan * 10 + satuan);
     }
+    
+    // Reset blinking seperti menu lainnya
+    blinkState = false;
+    lastBlinkTime = millis();
   }
 }
 
@@ -479,24 +515,24 @@ void updateTombolBlynk() {
 void kondisiManual() {
   if (modeManual) {
     digitalWrite(RELAY_MANUAL, LOW);  // Relay manual ON
-
-    static bool lastBtnState = HIGH;
-    bool curBtnState = digitalRead(BTN_MANUAL);
-
-    if (readButton(BTN_MANUAL, lastManualState, lastManualPress)) {
-      pompaManual = !pompaManual;
-      Blynk.virtualWrite(V2, pompaManual ? 1 : 0);
-    }
+    
+    // Update relay pompa berdasarkan status pompaManual dari Blynk
+    digitalWrite(RELAY_POMPA1, pompaManual ? LOW : HIGH);
+    
   } else {
     digitalWrite(RELAY_MANUAL, HIGH);
-    pompaManual = false;
+    
+    // Reset pompa manual saat switch ke auto
+    if (pompaManual) {
+      pompaManual = false;
+      if (Blynk.connected()) {
+        Blynk.virtualWrite(V2, 0);
+        lastSentPompaManual = false;
+        Serial.println("Pump turned OFF - switched to AUTO mode");
+      }
+    }
   }
-
-  updateTombolBlynk();  // panggil update tombol di Blynk
-
-  if (!modeManual) {
-    Blynk.virtualWrite(V2, 0);
-  }
+  updateTombolBlynk();
 }
 
 // ---------------- WiFi/Blynk reconnect (non-blocking) ----------------
@@ -511,7 +547,10 @@ void tryReconnectWiFi() {
 void tryReconnectBlynk() {
   if (WiFi.status() == WL_CONNECTED && !Blynk.connected() && millis() - lastBlynkTry > 2000) {
     lastBlynkTry = millis();
-    Blynk.connect();
+    if (Blynk.connect()) {
+      forceBlynkSync = true; // Set flag untuk sync data setelah reconnect
+      Serial.println("Blynk reconnected");
+    }
   }
 }
 
@@ -535,13 +574,9 @@ void loop() {
     Blynk.run();
     Seluruhnya();
 
-    // Kirim ke Blynk cuma setiap 5 detik
-    if (millis() - lastBlynkUpdate > blynkInterval) {
-      if (Blynk.connected()) {
-        Blynk.virtualWrite(V1, T + kalibSuhu);
-      }
-      lastBlynkUpdate = millis();
-    }
+    // Kirim ke Blynk hanya jika ada perubahan
+    updateBlynkIfChanged();   
+
   } else {
     if (flag == true) {
       lcd.init();
@@ -675,6 +710,7 @@ void Seluruhnya() {
 
       if (Blynk.connected()) {
         Blynk.virtualWrite(V0, modeManual ? 1 : 0);
+        lastSentModeManual = modeManual;
       }
     }
   }
@@ -758,47 +794,68 @@ void handleSubMenus() {
   }
 
   else if (inKalibSuhu) {
-    unsigned long nowTime = millis();
-    if (nowTime - lastBlinkTime >= blinkInterval) {
-      blinkState = !blinkState;
-      lastBlinkTime = nowTime;
+  // Update blinking timer seperti menu lainnya
+  unsigned long nowTime = millis();
+  if (nowTime - lastBlinkTime >= blinkInterval) {
+    blinkState = !blinkState;
+    lastBlinkTime = nowTime;
+  }
 
-      lcd.setCursor(0, 1);
-      if (curDigit == 0 && blinkState) lcd.print('_');
-      else lcd.print(kalibSuhu < 0 ? '-' : '+');
+  // Display kalibrasi suhu dengan blinking konsisten
+  lcd.setCursor(0, 1);
+  
+  // Digit 0: Tanda +/-
+  if (curDigit == 0 && blinkState) {
+    lcd.print("_");  // Blinking underscore
+  } else {
+    lcd.print(kalibSuhu < 0 ? "-" : "+");
+  }
 
-      int absVal = abs(kalibSuhu);
-      int puluhan = absVal / 10;
-      int satuan = absVal % 10;
+  int absVal = abs(kalibSuhu);
+  int puluhan = absVal / 10;
+  int satuan = absVal % 10;
 
-      lcd.setCursor(1, 1);
-      if (curDigit == 1 && blinkState) lcd.print('_');
-      else lcd.print(puluhan);
+  // Digit 1: Puluhan
+  lcd.setCursor(1, 1);
+  if (curDigit == 1 && blinkState) {
+    lcd.print("_");  // Blinking underscore
+  } else {
+    lcd.print(puluhan);
+  }
 
-      lcd.setCursor(2, 1);
-      if (curDigit == 2 && blinkState) lcd.print('_');
-      else lcd.print(satuan);
-    }
+  // Digit 2: Satuan
+  lcd.setCursor(2, 1);
+  if (curDigit == 2 && blinkState) {
+    lcd.print("_");  // Blinking underscore
+  } else {
+    lcd.print(satuan);
+  }
 
-    updateKalibSuhu();
+  // Handle tombol UP/DOWN
+  updateKalibSuhu();
 
-    if (readButton(OK_BTN, lastOkState, lastOkPress)) {
-      curDigit++;
-      if (curDigit > 2) {
-        inKalibSuhu = false;
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("Simpan OK");
-        delay(500);
-        displayMenu();
-      }
-    }
-
-    if (readButton(BACK_BTN, lastBackState, lastBackPress)) {
+  // Handle tombol OK
+  if (readButton(OK_BTN, lastOkState, lastOkPress)) {
+    curDigit++;
+    if (curDigit > 2) {
       inKalibSuhu = false;
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Simpan OK");
+      delay(500);
       displayMenu();
     }
+    // Reset blinking saat pindah digit
+    blinkState = true;
+    lastBlinkTime = millis();
   }
+
+  // Handle tombol BACK
+  if (readButton(BACK_BTN, lastBackState, lastBackPress)) {
+    inKalibSuhu = false;
+    displayMenu();
+  }
+}
 
   else if (inSetBatasSuhu) {
     unsigned long nowTime = millis();
@@ -1229,4 +1286,42 @@ void enterMainMenu() {
   lcd.print(">");
   lcd.setCursor(1, 0);
   lcd.print(menuItems[curMenu]);
+}
+
+// Fungsi untuk mengirim data ke Blynk hanya jika ada perubahan
+void updateBlynkIfChanged() {
+  if (!Blynk.connected()) return;
+
+  bool needUpdate = false;
+  
+  // Cek perubahan suhu (dengan toleransi 0.1 derajat)
+  float currentTemp = T + kalibSuhu;
+  if (abs(currentTemp - lastSentTemperature) >= 0.1 || forceBlynkSync) {
+    Blynk.virtualWrite(V1, currentTemp);
+    lastSentTemperature = currentTemp;
+    needUpdate = true;
+    Serial.println("Blynk: Temperature updated - " + String(currentTemp));
+  }
+
+  // Cek perubahan mode manual
+  if (lastSentModeManual != modeManual || forceBlynkSync) {
+    Blynk.virtualWrite(V0, modeManual ? 1 : 0);
+    lastSentModeManual = modeManual;
+    needUpdate = true;
+    Serial.println("Blynk: Mode updated - " + String(modeManual ? "Manual" : "Auto"));
+  }
+
+  // Cek perubahan pompa manual
+  if (lastSentPompaManual != pompaManual || forceBlynkSync) {
+    Blynk.virtualWrite(V2, pompaManual ? 1 : 0);
+    lastSentPompaManual = pompaManual;
+    needUpdate = true;
+    Serial.println("Blynk: Pump manual updated - " + String(pompaManual ? "ON" : "OFF"));
+  }
+
+  // Reset force sync flag
+  if (needUpdate || forceBlynkSync) {
+    Serial.println("Blynk: Data sent to cloud");
+    forceBlynkSync = false;
+  }
 }
