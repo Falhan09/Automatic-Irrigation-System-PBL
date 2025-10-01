@@ -108,7 +108,7 @@ bool flag = false;
 // Set Batas Suhu
 int batasSuhu = 28;
 int batasBuffer[2] = { 2, 8 };  //untuk Menyimpan data suhu karena 2 digit
-// ---------- Jadwal P1 ----------
+// ---------- Jadwal ----------
 int jadwalJam[2] = { 8, 20 };                  // default jam mulai
 int jadwalMenit[2] = { 0, 0 };                 // default menit mulai
 int durasiDetik[2] = { 1, 1 };                 // durasi aktif relay dalam menit
@@ -128,6 +128,13 @@ bool lastSentModeManual = false;
 bool lastSentPompaManual = false;
 bool lastSentRelayState = false;
 bool forceBlynkSync = false;  // Flag untuk force sync saat koneksi baru
+
+// Variabel global untuk emergency reset darurat
+unsigned long emergencyResetStartTime = 0;
+bool emergencyResetActive = false;
+const unsigned long EMERGENCY_RESET_DURATION = 5000; // 5 detik untuk keamanan
+unsigned long lastEmergencyCheck = 0;
+const unsigned long EMERGENCY_CHECK_INTERVAL = 100; // Cek setiap 100ms
 
 // Fungsi untuk membaca tombol dengan debounce yang proper
 bool readButton(int pin, bool& lastState, unsigned long& lastPress) {
@@ -555,6 +562,15 @@ void tryReconnectBlynk() {
 }
 
 void loop() {
+  if (millis() - lastEmergencyCheck >= EMERGENCY_CHECK_INTERVAL) {
+    lastEmergencyCheck = millis();
+    emergencyReset();
+  }
+  
+  // Jika emergency aktif, SKIP semua proses
+  if (emergencyResetActive) {
+    return;
+  }
   // Jalankan Blynk hanya kalau koneksi ada, tapi jangan blokir program
   tryReconnectWiFi();
   tryReconnectBlynk();
@@ -1287,7 +1303,6 @@ void enterMainMenu() {
   lcd.setCursor(1, 0);
   lcd.print(menuItems[curMenu]);
 }
-<<<<<<< HEAD
 
 // Fungsi untuk mengirim data ke Blynk hanya jika ada perubahan
 void updateBlynkIfChanged() {
@@ -1324,5 +1339,51 @@ void updateBlynkIfChanged() {
   if (needUpdate || forceBlynkSync) {
     Serial.println("Blynk: Data sent to cloud");
     forceBlynkSync = false;
+  }
+}
+
+void emergencyReset() {
+  // Baca langsung dari pin
+  bool upPressed = (digitalRead(UP_BTN) == LOW);
+  bool okPressed = (digitalRead(OK_BTN) == LOW);
+  
+  // Kombinasi BACK + OK selama 5 detik
+  if (upPressed && okPressed) {
+    if (!emergencyResetActive) {
+      emergencyResetActive = true;
+      emergencyResetStartTime = millis();
+      
+      // Force clear LCD
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("EMERGENCY RESET");
+      lcd.setCursor(0, 1);
+      lcd.print("Hold 5s to reset");
+    }
+    
+    unsigned long elapsed = millis() - emergencyResetStartTime;
+    
+    if (elapsed >= EMERGENCY_RESET_DURATION) {
+      // PAKSA RESTART
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("RESTARTING...");
+      delay(1000);
+      
+      ESP.restart();
+    } else {
+      // Countdown
+      unsigned long remaining = (EMERGENCY_RESET_DURATION - elapsed) / 1000 + 1;
+      static unsigned long lastUpdate = 0;
+      if (millis() - lastUpdate >= 500) { // Update setiap 500ms
+        lastUpdate = millis();
+        lcd.setCursor(0, 1);
+        lcd.print("Reset in: ");
+        lcd.print(remaining);
+        lcd.print("s   ");
+      }
+    }
+  } else {
+    emergencyResetActive = false;
   }
 }
